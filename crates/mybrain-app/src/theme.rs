@@ -264,12 +264,18 @@ pub const BG_HOVER: Color32 = Color32::from_rgb(44, 44, 48);
 #[allow(dead_code)]
 pub const BG_ACTIVE: Color32 = Color32::from_rgb(56, 56, 62);
 
+#[allow(dead_code)]
 pub const TEXT_PRIMARY: Color32 = Color32::from_rgb(236, 236, 240);
+#[allow(dead_code)]
 pub const TEXT_MUTED: Color32 = Color32::from_rgb(150, 150, 158);
+#[allow(dead_code)]
 pub const TEXT_FAINT: Color32 = Color32::from_rgb(96, 96, 104);
 
+#[allow(dead_code)]
 pub const ACCENT_PURPLE: Color32 = Color32::from_rgb(139, 124, 246);
+#[allow(dead_code)]
 pub const ACCENT_PURPLE_LIGHT: Color32 = Color32::from_rgb(214, 208, 255);
+#[allow(dead_code)]
 pub const ACCENT_CYAN: Color32 = Color32::from_rgb(85, 205, 195);
 #[allow(dead_code)]
 pub const ACCENT_AMBER: Color32 = Color32::from_rgb(240, 190, 90);

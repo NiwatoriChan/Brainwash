@@ -9,17 +9,21 @@ use crate::theme::Tokens;
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
 
-    ui.horizontal(|ui| {
-        ui.heading(RichText::new("Calendar & Events").color(t.text).strong());
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button(RichText::new("+ New Event").color(t.success)).clicked() {
-                state.new_event_draft.date = Local::now().date_naive();
-                state.show_new_event_dialog = true;
-            }
-        });
-    });
+    Frame::NONE
+        .fill(t.canvas)
+        .inner_margin(Margin::symmetric(28, 20))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.heading(RichText::new("Calendar & Events").color(t.text).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(RichText::new("+ New Event").color(t.success)).clicked() {
+                        state.new_event_draft.date = Local::now().date_naive();
+                        state.show_new_event_dialog = true;
+                    }
+                });
+            });
 
-    ui.separator();
+            ui.separator();
 
     let events = state.event_store.all(&state.vault);
 
@@ -77,5 +81,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
             ui.add_space(6.0);
         }
+    });
     });
 }

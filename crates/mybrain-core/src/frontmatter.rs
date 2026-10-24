@@ -68,6 +68,10 @@ impl Frontmatter {
         self.entries.is_empty()
     }
 
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.entries.iter().map(|(k, v)| (k.as_str(), v.as_str()))
+    }
+
     /// Serialises the front-matter including the surrounding `---` lines.
     /// Returns an empty string when there are no entries.
     pub fn render(&self) -> String {

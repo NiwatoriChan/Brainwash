@@ -1,126 +1,168 @@
+//! Markdown editor and Obsidian-style live rendering view.
+
 use egui::{
     text::LayoutJob, CornerRadius, FontId, Frame, Margin, RichText, ScrollArea, Stroke,
     TextBuffer, TextFormat, Ui,
 };
+use mybrain_core::frontmatter::Frontmatter;
 use mybrain_core::markdown::{
     parse_blocks, parse_inline, toggle_task, Block, Inline, ListMarker,
 };
+use mybrain_core::vault::Vault;
 
 use crate::state::{AppState, ViewMode};
-use crate::theme::{
-    ACCENT_CYAN, ACCENT_PURPLE, ACCENT_PURPLE_LIGHT, BG_CANVAS, BG_CARD, BG_HOVER, BORDER_COLOR,
-    TEXT_FAINT, TEXT_MUTED, TEXT_PRIMARY,
-};
+use crate::theme::Tokens;
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
+    let t = Tokens::get(ui.ctx());
+
     let Some(active_id) = state.active_note.clone() else {
         ui.centered_and_justified(|ui| {
-            ui.label(RichText::new("No note selected.\nCreate or choose a note from the sidebar.").color(TEXT_MUTED).size(16.0));
+            ui.label(
+                RichText::new("No note selected.\nCreate or choose a note from the sidebar.")
+                    .color(t.text_dim)
+                    .size(16.0),
+            );
         });
         return;
     };
 
     // Note header / Toolbar
-    ui.horizontal(|ui| {
-        // Back / Forward buttons
-        if ui.add_enabled(state.can_go_back(), egui::Button::new("←").frame(false)).clicked() {
-            state.go_back();
-        }
-        if ui.add_enabled(state.can_go_forward(), egui::Button::new("→").frame(false)).clicked() {
-            state.go_forward();
-        }
+    Frame::NONE
+        .fill(t.canvas)
+        .inner_margin(Margin::symmetric(28, 8))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                // Back / Forward buttons
+                if ui.add_enabled(state.can_go_back(), egui::Button::new("←").frame(false)).clicked() {
+                    state.go_back();
+                }
+                if ui.add_enabled(state.can_go_forward(), egui::Button::new("→").frame(false)).clicked() {
+                    state.go_forward();
+                }
 
-        ui.separator();
+                ui.separator();
 
-        // Note title & folder
-        ui.vertical(|ui| {
-            if let Some(folder) = active_id.folder() {
-                ui.label(RichText::new(folder).color(TEXT_FAINT).size(11.0));
-            }
-            ui.heading(RichText::new(active_id.name()).color(TEXT_PRIMARY).strong());
+                // Note title & folder
+                ui.vertical(|ui| {
+                    if let Some(folder) = active_id.folder() {
+                        ui.label(RichText::new(folder).color(t.text_faint).size(11.0));
+                    }
+                    ui.heading(RichText::new(active_id.name()).color(t.text).strong());
+                });
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // Delete button
+                    if ui.button(RichText::new("Delete").color(t.text_dim)).on_hover_text("Delete note").clicked() {
+                        state.delete_current_note();
+                        return;
+                    }
+
+                    ui.separator();
+
+                    // View mode switchers
+                    let mode = state.view_mode;
+                    if ui.selectable_label(mode == ViewMode::PreviewOnly, "Preview").clicked() {
+                        state.view_mode = ViewMode::PreviewOnly;
+                    }
+                    if ui.selectable_label(mode == ViewMode::Split, "Split").clicked() {
+                        state.view_mode = ViewMode::Split;
+                    }
+                    if ui.selectable_label(mode == ViewMode::EditOnly, "Edit").clicked() {
+                        state.view_mode = ViewMode::EditOnly;
+                    }
+
+                    // Save status indicator
+                    if state.editor_dirty {
+                        ui.label(RichText::new("● Unsaved").color(t.accent_text).size(11.0));
+                    } else {
+                        ui.label(RichText::new("Saved").color(t.text_faint).size(11.0));
+                    }
+                });
+            });
         });
-
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // Delete button
-            if ui.button(RichText::new("Delete").color(TEXT_MUTED)).on_hover_text("Delete note").clicked() {
-                state.delete_current_note();
-                return;
-            }
-
-            ui.separator();
-
-            // View mode switchers
-            let mode = state.view_mode;
-            if ui.selectable_label(mode == ViewMode::PreviewOnly, "Preview").clicked() {
-                state.view_mode = ViewMode::PreviewOnly;
-            }
-            if ui.selectable_label(mode == ViewMode::Split, "Split").clicked() {
-                state.view_mode = ViewMode::Split;
-            }
-            if ui.selectable_label(mode == ViewMode::EditOnly, "Edit").clicked() {
-                state.view_mode = ViewMode::EditOnly;
-            }
-
-            // Save status indicator
-            if state.editor_dirty {
-                ui.label(RichText::new("● Unsaved").color(ACCENT_PURPLE_LIGHT).size(11.0));
-            } else {
-                ui.label(RichText::new("Saved").color(TEXT_FAINT).size(11.0));
-            }
-        });
-    });
 
     ui.separator();
 
-    // Main workspace area
-    let available_width = ui.available_width();
+    // Main workspace area - seamless with canvas
+    let available_size = ui.available_size();
     match state.view_mode {
         ViewMode::EditOnly => {
-            render_editor(ui, state, available_width);
+            ui.allocate_ui_with_layout(
+                available_size,
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    render_editor_pane(ui, state, &t);
+                },
+            );
         }
         ViewMode::PreviewOnly => {
-            render_preview(ui, state, available_width);
+            ui.allocate_ui_with_layout(
+                available_size,
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    render_preview_pane(ui, state, &t);
+                },
+            );
         }
         ViewMode::Split => {
-            let half = (available_width - 16.0) / 2.0;
-            ui.columns(2, |cols| {
-                render_editor(&mut cols[0], state, half);
-                render_preview(&mut cols[1], state, half);
+            let pane_width = ((available_size.x - 1.0) / 2.0).max(100.0);
+            let pane_height = available_size.y;
+
+            ui.horizontal(|ui| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(pane_width, pane_height),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        render_editor_pane(ui, state, &t);
+                    },
+                );
+
+                ui.separator();
+
+                ui.allocate_ui_with_layout(
+                    egui::vec2(ui.available_width(), pane_height),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        render_preview_pane(ui, state, &t);
+                    },
+                );
             });
         }
     }
 }
 
-fn render_editor(ui: &mut Ui, state: &mut AppState, width: f32) {
+fn render_editor_pane(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
     Frame::NONE
-        .fill(BG_CANVAS)
-        .inner_margin(Margin::same(8))
-        .corner_radius(CornerRadius::same(6))
-        .stroke(Stroke::new(1.0, BORDER_COLOR))
+        .fill(t.canvas)
+        .inner_margin(Margin::symmetric(36, 16))
         .show(ui, |ui| {
-            ui.set_width(width);
-            ScrollArea::vertical().id_salt("editor_scroll").show(ui, |ui| {
-                let mut layouter = |ui: &Ui, buf: &dyn TextBuffer, wrap_width: f32| {
-                    let mut layout_job = highlight_markdown(buf.as_str());
-                    layout_job.wrap.max_width = wrap_width;
-                    ui.ctx().fonts_mut(|f| f.layout_job(layout_job))
-                };
+            ScrollArea::vertical()
+                .id_salt("editor_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    let mut layouter = |ui: &Ui, buf: &dyn TextBuffer, wrap_width: f32| {
+                        let mut layout_job = highlight_markdown(buf.as_str(), t);
+                        layout_job.wrap.max_width = wrap_width;
+                        ui.ctx().fonts_mut(|f| f.layout_job(layout_job))
+                    };
 
-                let output = egui::TextEdit::multiline(&mut state.editor_buffer)
-                    .code_editor()
-                    .desired_width(f32::INFINITY)
-                    .desired_rows(35)
-                    .layouter(&mut layouter)
-                    .frame(Frame::NONE)
-                    .show(ui);
+                    let output = egui::TextEdit::multiline(&mut state.editor_buffer)
+                        .code_editor()
+                        .desired_width(f32::INFINITY)
+                        .layouter(&mut layouter)
+                        .frame(Frame::NONE)
+                        .show(ui);
 
-                if output.response.changed() {
-                    state.editor_dirty = true;
-                }
+                    if output.response.changed() {
+                        state.editor_dirty = true;
+                    }
 
-                // Wiki-link autocomplete popup when typing `[[`
-                render_link_autocomplete(ui, state, &output);
-            });
+                    // Wiki-link autocomplete popup when typing `[[`
+                    render_link_autocomplete(ui, state, &output, t);
+
+                    ui.add_space(80.0);
+                });
         });
 }
 
@@ -128,6 +170,7 @@ fn render_link_autocomplete(
     ui: &mut Ui,
     state: &mut AppState,
     output: &egui::text_edit::TextEditOutput,
+    t: &Tokens,
 ) {
     if let Some(cursor_range) = output.cursor_range {
         let cursor_char_idx = cursor_range.primary.index.0;
@@ -153,14 +196,14 @@ fn render_link_autocomplete(
             if !matches.is_empty() {
                 let mut chosen_note = None;
                 Frame::NONE
-                    .fill(BG_CARD)
-                    .stroke(Stroke::new(1.5, ACCENT_PURPLE))
-                    .corner_radius(CornerRadius::same(6))
-                    .inner_margin(Margin::same(6))
+                    .fill(t.card)
+                    .stroke(Stroke::new(1.5, t.accent_border))
+                    .corner_radius(CornerRadius::same(t.radius_sm as u8))
+                    .inner_margin(Margin::same(8))
                     .show(ui, |ui| {
-                        ui.label(RichText::new("Link to note:").color(TEXT_MUTED).size(11.0));
+                        ui.label(RichText::new("Link to note:").color(t.text_dim).size(11.0));
                         for note_name in matches {
-                            if ui.button(RichText::new(format!("[[{}]]", note_name)).color(ACCENT_PURPLE_LIGHT)).clicked() {
+                            if ui.button(RichText::new(format!("[[{}]]", note_name)).color(t.accent_text)).clicked() {
                                 chosen_note = Some(note_name);
                             }
                         }
@@ -179,16 +222,34 @@ fn render_link_autocomplete(
     }
 }
 
-fn render_preview(ui: &mut Ui, state: &mut AppState, width: f32) {
+fn render_preview_pane(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
     Frame::NONE
-        .fill(BG_CANVAS)
-        .inner_margin(Margin::same(12))
-        .corner_radius(CornerRadius::same(6))
-        .stroke(Stroke::new(1.0, BORDER_COLOR))
+        .fill(t.canvas)
+        .inner_margin(Margin::symmetric(36, 16))
         .show(ui, |ui| {
-            ui.set_width(width);
-            ScrollArea::vertical().id_salt("preview_scroll").show(ui, |ui| {
+            ScrollArea::vertical()
+                .id_salt("preview_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    // 1. Obsidian-style Frontmatter Properties
+                    let (frontmatter, _) = Frontmatter::parse(&state.editor_buffer);
+                    if !frontmatter.is_empty() {
+                        render_properties_card(ui, &frontmatter, t);
+                        ui.add_space(14.0);
+                        ui.separator();
+                        ui.add_space(10.0);
+                    }
+
+                // 2. Note title if not explicitly started with H1
                 let blocks = parse_blocks(&state.editor_buffer);
+                let first_is_h1 = blocks.first().map_or(false, |b| matches!(b.block, Block::Heading { level: 1, .. }));
+                if !first_is_h1 {
+                    if let Some(active_id) = &state.active_note {
+                        ui.label(RichText::new(active_id.name()).size(26.0).strong().color(t.text));
+                        ui.add_space(8.0);
+                    }
+                }
+
                 let mut task_to_toggle: Option<usize> = None;
                 let mut note_to_open: Option<String> = None;
 
@@ -196,76 +257,85 @@ fn render_preview(ui: &mut Ui, state: &mut AppState, width: f32) {
                     let line_no = item.line;
                     match item.block {
                         Block::Heading { level, text } => {
-                            let size = match level {
-                                1 => 24.0,
-                                2 => 20.0,
-                                3 => 17.0,
-                                _ => 14.0,
+                            let (size, top_space, bottom_space) = match level {
+                                1 => (26.0, 18.0, 8.0),
+                                2 => (21.0, 14.0, 6.0),
+                                3 => (17.5, 10.0, 4.0),
+                                4 => (15.0, 8.0, 2.0),
+                                _ => (13.5, 6.0, 2.0),
                             };
-                            ui.add_space(8.0);
-                            ui.label(RichText::new(text).size(size).color(TEXT_PRIMARY).strong());
-                            if level <= 2 {
+                            ui.add_space(top_space);
+                            ui.label(RichText::new(text).size(size).color(t.text).strong());
+                            ui.add_space(bottom_space);
+                            if level == 1 {
                                 ui.separator();
+                                ui.add_space(4.0);
                             }
                         }
                         Block::Paragraph(text) => {
-                            render_inline_spans(ui, text, &mut note_to_open);
+                            render_inline_spans(ui, text, &mut note_to_open, false, &state.vault, t);
+                            ui.add_space(6.0);
                         }
                         Block::ListItem { indent, marker, text } => {
                             ui.horizontal(|ui| {
                                 if indent > 0 {
-                                    ui.add_space(indent as f32 * 16.0);
+                                    ui.add_space(indent as f32 * 18.0);
                                 }
-                                match marker {
+                                let is_task_checked = match marker {
                                     ListMarker::Bullet => {
-                                        ui.label(RichText::new("•").color(ACCENT_PURPLE_LIGHT));
+                                        ui.label(RichText::new("•").color(t.accent_text).size(13.0));
+                                        false
                                     }
                                     ListMarker::Ordered(n) => {
-                                        ui.label(RichText::new(format!("{n}.")).color(TEXT_MUTED));
+                                        ui.label(RichText::new(format!("{n}.")).color(t.text_dim).size(12.0));
+                                        false
                                     }
                                     ListMarker::Task { checked } => {
                                         let mut is_checked = checked;
                                         if ui.checkbox(&mut is_checked, "").changed() {
                                             task_to_toggle = Some(line_no);
                                         }
+                                        checked
                                     }
-                                }
-                                render_inline_spans(ui, text, &mut note_to_open);
+                                };
+                                render_inline_spans(ui, text, &mut note_to_open, is_task_checked, &state.vault, t);
                             });
+                            ui.add_space(2.0);
                         }
                         Block::Quote(text) => {
-                            Frame::NONE
-                                .fill(BG_CARD)
-                                .stroke(Stroke::new(1.0, BORDER_COLOR))
-                                .corner_radius(CornerRadius::same(4))
-                                .inner_margin(Margin::symmetric(10, 6))
-                                .show(ui, |ui| {
-                                    ui.horizontal(|ui| {
-                                        ui.label(RichText::new("|").strong().color(ACCENT_PURPLE));
-                                        render_inline_spans(ui, text, &mut note_to_open);
-                                    });
-                                });
+                            render_quote_or_callout(ui, text, &mut note_to_open, &state.vault, t);
+                            ui.add_space(8.0);
                         }
                         Block::Code { lang, code } => {
                             Frame::NONE
-                                .fill(BG_CARD)
-                                .stroke(Stroke::new(1.0, BORDER_COLOR))
-                                .corner_radius(CornerRadius::same(6))
-                                .inner_margin(Margin::same(8))
+                                .fill(t.dock)
+                                .corner_radius(CornerRadius::same(t.radius_sm as u8))
+                                .inner_margin(Margin::same(12))
                                 .show(ui, |ui| {
                                     if !lang.is_empty() {
-                                        ui.label(RichText::new(lang).color(TEXT_FAINT).size(10.0));
+                                        ui.horizontal(|ui| {
+                                            ui.label(
+                                                RichText::new(lang.to_uppercase())
+                                                    .color(t.text_faint)
+                                                    .size(10.0)
+                                                    .strong(),
+                                            );
+                                        });
+                                        ui.add_space(4.0);
                                     }
-                                    ui.label(RichText::new(code.trim_end()).monospace().color(TEXT_PRIMARY));
+                                    ScrollArea::horizontal().id_salt(format!("code_block_{line_no}")).show(ui, |ui| {
+                                        ui.label(RichText::new(code.trim_end()).monospace().color(t.text).size(12.5));
+                                    });
                                 });
+                            ui.add_space(8.0);
                         }
                         Block::Rule => {
-                            ui.add_space(4.0);
+                            ui.add_space(10.0);
                             ui.separator();
-                            ui.add_space(4.0);
+                            ui.add_space(10.0);
                         }
                         Block::Blank => {
-                            ui.add_space(4.0);
+                            ui.add_space(6.0);
                         }
                     }
                 }
@@ -282,54 +352,186 @@ fn render_preview(ui: &mut Ui, state: &mut AppState, width: f32) {
                 if let Some(target) = note_to_open {
                     state.open_or_create(&target);
                 }
+
+                ui.add_space(80.0);
             });
         });
 }
 
-fn render_inline_spans(ui: &mut Ui, text: &str, note_to_open: &mut Option<String>) {
+/// Renders an Obsidian 1.4+ style collapsible Properties / Metadata block
+fn render_properties_card(ui: &mut Ui, frontmatter: &Frontmatter, t: &Tokens) {
+    Frame::NONE
+        .fill(t.canvas)
+        .inner_margin(Margin::symmetric(0, 4))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("PROPERTIES").color(t.text_faint).size(10.5).strong());
+            });
+            ui.add_space(6.0);
+
+            for (key, val) in frontmatter.iter() {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(key).color(t.text_dim).size(12.0));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if key == "tags" {
+                            for tag in val.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                                Frame::NONE
+                                    .fill(t.accent_soft)
+                                    .corner_radius(CornerRadius::same(10))
+                                    .inner_margin(Margin::symmetric(8, 2))
+                                    .show(ui, |ui| {
+                                        ui.label(RichText::new(format!("#{tag}")).color(t.accent_text).size(11.0));
+                                    });
+                            }
+                        } else {
+                            ui.label(RichText::new(val).color(t.text).size(12.0));
+                        }
+                    });
+                });
+                ui.add_space(3.0);
+            }
+        });
+}
+
+/// Renders either an Obsidian callout (`> [!NOTE]`) or a standard blockquote
+fn render_quote_or_callout(
+    ui: &mut Ui,
+    text: &str,
+    note_to_open: &mut Option<String>,
+    vault: &Vault,
+    t: &Tokens,
+) {
+    let trimmed = text.trim();
+    if let Some(rest) = trimmed.strip_prefix("[!") {
+        if let Some((kind_str, after)) = rest.split_once(']') {
+            let kind = kind_str.trim().to_uppercase();
+            let (accent_color, label) = match kind.as_str() {
+                "NOTE" | "INFO" => (t.accent, "NOTE"),
+                "TIP" | "HINT" | "SUCCESS" | "IMPORTANT" => (t.success, "TIP"),
+                "WARNING" | "CAUTION" | "ATTENTION" => (t.warning, "WARNING"),
+                "DANGER" | "ERROR" | "BUG" | "FAILURE" => (t.danger, "DANGER"),
+                _ => (t.accent_text, kind.as_str()),
+            };
+
+            let body = after.trim();
+
+            Frame::NONE
+                .fill(t.accent_soft)
+                .corner_radius(CornerRadius::same(t.radius_sm as u8))
+                .inner_margin(Margin::same(10))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(format!("[{label}]"))
+                                .color(accent_color)
+                                .strong()
+                                .size(12.0),
+                        );
+                    });
+                    ui.add_space(4.0);
+                    render_inline_spans(ui, body, note_to_open, false, vault, t);
+                });
+            return;
+        }
+    }
+
+    // Standard Obsidian blockquote with accent left bar - completely seamless
+    Frame::NONE
+        .inner_margin(Margin::symmetric(8, 4))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("▎").strong().color(t.accent).size(13.0));
+                render_inline_spans(ui, text, note_to_open, false, vault, t);
+            });
+        });
+}
+
+fn render_inline_spans(
+    ui: &mut Ui,
+    text: &str,
+    note_to_open: &mut Option<String>,
+    is_task_checked: bool,
+    vault: &Vault,
+    t: &Tokens,
+) {
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
+        ui.spacing_mut().item_spacing.x = 3.0;
         let spans = parse_inline(text);
         for span in spans {
             match span {
-                Inline::Text(t) => {
-                    ui.label(RichText::new(t).color(TEXT_PRIMARY));
+                Inline::Text(txt) => {
+                    let mut rt = RichText::new(txt);
+                    if is_task_checked {
+                        rt = rt.color(t.text_faint).strikethrough();
+                    } else {
+                        rt = rt.color(t.text);
+                    }
+                    ui.label(rt);
                 }
-                Inline::Bold(t) => {
-                    ui.label(RichText::new(t).strong().color(TEXT_PRIMARY));
+                Inline::Bold(txt) => {
+                    let mut rt = RichText::new(txt).strong();
+                    if is_task_checked {
+                        rt = rt.color(t.text_faint).strikethrough();
+                    } else {
+                        rt = rt.color(t.text);
+                    }
+                    ui.label(rt);
                 }
-                Inline::Italic(t) => {
-                    ui.label(RichText::new(t).italics().color(TEXT_PRIMARY));
+                Inline::Italic(txt) => {
+                    let mut rt = RichText::new(txt).italics();
+                    if is_task_checked {
+                        rt = rt.color(t.text_faint).strikethrough();
+                    } else {
+                        rt = rt.color(t.text_dim);
+                    }
+                    ui.label(rt);
                 }
-                Inline::Code(t) => {
+                Inline::Code(code) => {
                     Frame::NONE
-                        .fill(BG_CARD)
-                        .corner_radius(CornerRadius::same(3))
-                        .inner_margin(Margin::symmetric(4, 1))
+                        .fill(t.dock)
+                        .corner_radius(CornerRadius::same(4))
+                        .inner_margin(Margin::symmetric(5, 1))
                         .show(ui, |ui| {
-                            ui.label(RichText::new(t).monospace().color(ACCENT_CYAN).size(12.0));
+                            ui.label(RichText::new(code).monospace().color(t.accent_text).size(12.0));
                         });
                 }
                 Inline::Url(u) => {
-                    ui.hyperlink_to(RichText::new(u).color(ACCENT_CYAN).underline(), u);
+                    ui.hyperlink_to(RichText::new(u).color(t.accent).underline(), u);
                 }
                 Inline::Tag(tag) => {
                     Frame::NONE
-                        .fill(BG_HOVER)
-                        .corner_radius(CornerRadius::same(8))
-                        .inner_margin(Margin::symmetric(6, 2))
+                        .fill(t.accent_soft)
+                        .corner_radius(CornerRadius::same(10))
+                        .inner_margin(Margin::symmetric(7, 2))
                         .show(ui, |ui| {
-                            ui.label(RichText::new(format!("#{tag}")).color(ACCENT_PURPLE_LIGHT).size(11.0));
+                            ui.label(RichText::new(format!("#{tag}")).color(t.accent_text).size(11.0));
                         });
                 }
                 Inline::Link(link) => {
                     let label = link.display_text();
-                    let btn = ui.button(
-                        RichText::new(format!("[[{label}]]"))
-                            .color(ACCENT_PURPLE_LIGHT)
-                            .underline(),
+                    let is_resolved = vault.resolve_link(&link.target).is_some();
+                    let link_color = if is_resolved {
+                        t.accent_text
+                    } else {
+                        t.warning
+                    };
+
+                    let btn = ui.add(
+                        egui::Button::new(
+                            RichText::new(label)
+                                .color(link_color)
+                                .underline(),
+                        )
+                        .frame(false),
                     );
-                    if btn.on_hover_text(format!("Jump to note: {}", link.target)).clicked() {
+
+                    let hover_text = if is_resolved {
+                        format!("Open note: {}", link.target)
+                    } else {
+                        format!("Create note: {} (uncreated)", link.target)
+                    };
+
+                    if btn.on_hover_text(hover_text).clicked() {
                         *note_to_open = Some(link.target.clone());
                     }
                 }
@@ -338,10 +540,10 @@ fn render_inline_spans(ui: &mut Ui, text: &str, note_to_open: &mut Option<String
     });
 }
 
-fn highlight_markdown(text: &str) -> LayoutJob {
+fn highlight_markdown(text: &str, t: &Tokens) -> LayoutJob {
     let mut job = LayoutJob::default();
-    let default_font = FontId::monospace(13.5);
-    let heading_font = FontId::monospace(15.0);
+    let default_font = FontId::monospace(13.0);
+    let heading_font = FontId::monospace(14.5);
 
     for line in text.split_inclusive('\n') {
         let trimmed = line.trim_start();
@@ -351,7 +553,7 @@ fn highlight_markdown(text: &str) -> LayoutJob {
                 0.0,
                 TextFormat {
                     font_id: heading_font.clone(),
-                    color: ACCENT_PURPLE_LIGHT,
+                    color: t.accent_text,
                     ..Default::default()
                 },
             );
@@ -361,12 +563,22 @@ fn highlight_markdown(text: &str) -> LayoutJob {
                 0.0,
                 TextFormat {
                     font_id: default_font.clone(),
-                    color: ACCENT_CYAN,
+                    color: t.warning,
+                    ..Default::default()
+                },
+            );
+        } else if trimmed.starts_with('>') {
+            job.append(
+                line,
+                0.0,
+                TextFormat {
+                    font_id: default_font.clone(),
+                    color: t.accent,
                     ..Default::default()
                 },
             );
         } else {
-            // Highlight [[wiki links]] within the line
+            // Highlight [[wiki links]], tags, and text within the line
             let mut last = 0;
             for link in mybrain_core::links::parse_links(line) {
                 if link.range.start > last {
@@ -375,7 +587,7 @@ fn highlight_markdown(text: &str) -> LayoutJob {
                         0.0,
                         TextFormat {
                             font_id: default_font.clone(),
-                            color: TEXT_PRIMARY,
+                            color: t.text,
                             ..Default::default()
                         },
                     );
@@ -385,7 +597,8 @@ fn highlight_markdown(text: &str) -> LayoutJob {
                     0.0,
                     TextFormat {
                         font_id: default_font.clone(),
-                        color: ACCENT_PURPLE,
+                        color: t.accent_text,
+                        underline: Stroke::new(1.0, t.accent_border),
                         ..Default::default()
                     },
                 );
@@ -397,7 +610,7 @@ fn highlight_markdown(text: &str) -> LayoutJob {
                     0.0,
                     TextFormat {
                         font_id: default_font.clone(),
-                        color: TEXT_PRIMARY,
+                        color: t.text,
                         ..Default::default()
                     },
                 );

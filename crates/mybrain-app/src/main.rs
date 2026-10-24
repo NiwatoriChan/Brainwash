@@ -46,6 +46,14 @@ impl BrainwashApp {
             if i.modifiers.command && i.key_pressed(egui::Key::N) {
                 self.state.show_new_note_dialog = true;
             }
+            // Ctrl+E: Toggle View Mode (Preview / Edit)
+            if i.modifiers.command && i.key_pressed(egui::Key::E) {
+                self.state.view_mode = match self.state.view_mode {
+                    crate::state::ViewMode::PreviewOnly => crate::state::ViewMode::EditOnly,
+                    crate::state::ViewMode::EditOnly => crate::state::ViewMode::PreviewOnly,
+                    crate::state::ViewMode::Split => crate::state::ViewMode::PreviewOnly,
+                };
+            }
             // Alt+Left / Alt+Right: Navigate history
             if i.modifiers.alt && i.key_pressed(egui::Key::ArrowLeft) {
                 self.state.go_back();
@@ -173,8 +181,8 @@ impl eframe::App for BrainwashApp {
                 .resizable(true)
                 .frame(
                     Frame::NONE
-                        .fill(theme::BG_PANEL)
-                        .stroke(Stroke::new(1.0, theme::BORDER_COLOR))
+                        .fill(tokens.dock)
+                        .stroke(Stroke::new(1.0, tokens.separator))
                         .inner_margin(Margin::same(10)),
                 )
                 .show(ui, |ui| {
@@ -186,8 +194,8 @@ impl eframe::App for BrainwashApp {
         egui::CentralPanel::default()
             .frame(
                 Frame::NONE
-                    .fill(theme::BG_CANVAS)
-                    .inner_margin(Margin::same(12)),
+                    .fill(tokens.canvas)
+                    .inner_margin(Margin::ZERO),
             )
             .show(ui, |ui| {
                 match self.state.main_tab {

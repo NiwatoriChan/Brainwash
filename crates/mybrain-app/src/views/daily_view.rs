@@ -9,16 +9,20 @@ use crate::theme::Tokens;
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
 
-    ui.horizontal(|ui| {
-        ui.heading(RichText::new("Daily Notes").color(t.text).strong());
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button(RichText::new("Today").color(t.accent_text)).clicked() {
-                state.open_daily_today();
-            }
-        });
-    });
+    Frame::NONE
+        .fill(t.canvas)
+        .inner_margin(Margin::symmetric(28, 20))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.heading(RichText::new("Daily Notes").color(t.text).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(RichText::new("Today").color(t.accent_text)).clicked() {
+                        state.open_daily_today();
+                    }
+                });
+            });
 
-    ui.separator();
+            ui.separator();
 
     // Date switcher buttons: Previous Day, Selected Date, Next Day
     ui.horizontal(|ui| {
@@ -80,5 +84,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 ui.add_space(4.0);
             }
         }
+    });
     });
 }
