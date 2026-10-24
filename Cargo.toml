@@ -1,0 +1,30 @@
+[workspace]
+resolver = "2"
+members = ["crates/mybrain-core", "crates/mybrain-app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.88"
+
+[workspace.dependencies]
+mybrain-core = { path = "crates/mybrain-core" }
+
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+walkdir = "2"
+tempfile = "3"
+
+eframe = { version = "0.37", default-features = false, features = ["glow", "persistence", "default_fonts", "wayland", "x11"] }
+egui = "0.37"
+log = "0.4"
+env_logger = "0.11"
+dirs = "6"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

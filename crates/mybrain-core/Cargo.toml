@@ -1,0 +1,19 @@
+[package]
+name = "mybrain-core"
+description = "UI-agnostic domain logic for MyBrain: vault, wiki-links, daily notes, quick notes and events."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+chrono.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
