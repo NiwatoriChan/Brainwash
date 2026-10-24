@@ -4,20 +4,19 @@ use egui::{CornerRadius, Frame, Margin, RichText, ScrollArea, Stroke, Ui};
 use mybrain_core::NoteId;
 
 use crate::state::AppState;
-use crate::theme::{
-    ACCENT_CYAN, ACCENT_PURPLE_LIGHT, ACCENT_RED, BG_CARD, BORDER_COLOR,
-    TEXT_FAINT, TEXT_MUTED, TEXT_PRIMARY,
-};
+use crate::theme::Tokens;
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
+    let t = Tokens::get(ui.ctx());
+
     ui.horizontal(|ui| {
-        ui.heading(RichText::new("🔗 Connections").color(TEXT_PRIMARY).strong().size(16.0));
+        ui.heading(RichText::new("Connections").color(t.text).strong().size(16.0));
     });
 
     ui.separator();
 
     let Some(active_id) = state.active_note.clone() else {
-        ui.label(RichText::new("Select a note to inspect connections").color(TEXT_MUTED));
+        ui.label(RichText::new("Select a note to inspect connections").color(t.text_dim));
         return;
     };
 
@@ -27,27 +26,27 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     ScrollArea::vertical().id_salt("backlinks_scroll").show(ui, |ui| {
         // 1. Backlinks (incoming links)
         let backlinks: Vec<_> = state.link_index.backlinks(&active_id).to_vec();
-        ui.label(RichText::new(format!("Incoming Backlinks ({})", backlinks.len())).strong().color(ACCENT_PURPLE_LIGHT).size(13.0));
+        ui.label(RichText::new(format!("Incoming Backlinks ({})", backlinks.len())).strong().color(t.accent_text).size(13.0));
 
         if backlinks.is_empty() {
-            ui.label(RichText::new("No other notes link here yet.").color(TEXT_FAINT).size(12.0));
+            ui.label(RichText::new("No other notes link here yet.").color(t.text_faint).size(12.0));
         } else {
             for bl in backlinks {
                 let source_id = bl.source.clone();
                 Frame::NONE
-                    .fill(BG_CARD)
-                    .stroke(Stroke::new(1.0, BORDER_COLOR))
-                    .corner_radius(CornerRadius::same(6))
+                    .fill(t.card)
+                    .stroke(Stroke::new(1.0, t.card_border))
+                    .corner_radius(CornerRadius::same(t.radius_sm as u8))
                     .inner_margin(Margin::same(8))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("📄").size(12.0));
-                            if ui.button(RichText::new(source_id.name()).strong().color(TEXT_PRIMARY)).clicked() {
+                            ui.label(RichText::new("←").strong().color(t.accent_text));
+                            if ui.button(RichText::new(source_id.name()).strong().color(t.text)).clicked() {
                                 note_to_open = Some(source_id);
                             }
                         });
                         if !bl.context.is_empty() {
-                            ui.label(RichText::new(&bl.context).color(TEXT_MUTED).size(11.0).italics());
+                            ui.label(RichText::new(&bl.context).color(t.text_dim).size(11.0).italics());
                         }
                     });
                 ui.add_space(4.0);
@@ -59,28 +58,28 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
         // 2. Outgoing Links
         let outgoing: Vec<_> = state.link_index.outgoing(&active_id).to_vec();
-        ui.label(RichText::new(format!("Outgoing Links ({})", outgoing.len())).strong().color(ACCENT_CYAN).size(13.0));
+        ui.label(RichText::new(format!("Outgoing Links ({})", outgoing.len())).strong().color(t.accent).size(13.0));
 
         if outgoing.is_empty() {
-            ui.label(RichText::new("No outgoing [[wiki links]] in this note.").color(TEXT_FAINT).size(12.0));
+            ui.label(RichText::new("No outgoing [[wiki links]] in this note.").color(t.text_faint).size(12.0));
         } else {
             for out in outgoing {
                 let target = out.link.target.clone();
                 let is_resolved = out.resolved.is_some();
 
                 Frame::NONE
-                    .fill(BG_CARD)
-                    .corner_radius(CornerRadius::same(4))
+                    .fill(t.card)
+                    .corner_radius(CornerRadius::same(t.radius_sm as u8))
                     .inner_margin(Margin::symmetric(6, 4))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            let icon = if is_resolved { "🔗" } else { "❓" };
-                            ui.label(RichText::new(icon).size(12.0));
+                            let icon = if is_resolved { "→" } else { "?" };
+                            ui.label(RichText::new(icon).strong().color(if is_resolved { t.accent_text } else { t.warning }));
 
                             let text = RichText::new(out.link.display_text()).color(if is_resolved {
-                                ACCENT_PURPLE_LIGHT
+                                t.accent_text
                             } else {
-                                ACCENT_RED
+                                t.danger
                             });
 
                             if ui.button(text).clicked() {
@@ -88,7 +87,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                             }
 
                             if !is_resolved {
-                                ui.label(RichText::new("(uncreated)").color(TEXT_FAINT).size(10.0));
+                                ui.label(RichText::new("(uncreated)").color(t.text_faint).size(10.0));
                             }
                         });
                     });
@@ -108,11 +107,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .collect();
 
         if !unresolved.is_empty() {
-            ui.label(RichText::new("Unresolved Links Across Vault").strong().color(TEXT_MUTED).size(12.0));
+            ui.label(RichText::new("Unresolved Links Across Vault").strong().color(t.text_dim).size(12.0));
             for (target, ref_count) in unresolved {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("• [[{target}]]")).color(TEXT_MUTED).size(11.0));
-                    ui.label(RichText::new(format!("({ref_count} ref)")).color(TEXT_FAINT).size(10.0));
+                    ui.label(RichText::new(format!("• [[{target}]]")).color(t.text_dim).size(11.0));
+                    ui.label(RichText::new(format!("({ref_count} ref)")).color(t.text_faint).size(10.0));
                     if ui.small_button("+ Create").clicked() {
                         note_to_create = Some(target);
                     }

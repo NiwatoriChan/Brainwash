@@ -23,10 +23,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     // Note header / Toolbar
     ui.horizontal(|ui| {
         // Back / Forward buttons
-        if ui.add_enabled(state.can_go_back(), egui::Button::new("◀").frame(false)).clicked() {
+        if ui.add_enabled(state.can_go_back(), egui::Button::new("←").frame(false)).clicked() {
             state.go_back();
         }
-        if ui.add_enabled(state.can_go_forward(), egui::Button::new("▶").frame(false)).clicked() {
+        if ui.add_enabled(state.can_go_forward(), egui::Button::new("→").frame(false)).clicked() {
             state.go_forward();
         }
 
@@ -42,7 +42,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // Delete button
-            if ui.button(RichText::new("🗑").color(TEXT_MUTED)).on_hover_text("Delete note").clicked() {
+            if ui.button(RichText::new("Delete").color(TEXT_MUTED)).on_hover_text("Delete note").clicked() {
                 state.delete_current_note();
                 return;
             }
@@ -51,13 +51,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
             // View mode switchers
             let mode = state.view_mode;
-            if ui.selectable_label(mode == ViewMode::PreviewOnly, "👁 Preview").clicked() {
+            if ui.selectable_label(mode == ViewMode::PreviewOnly, "Preview").clicked() {
                 state.view_mode = ViewMode::PreviewOnly;
             }
-            if ui.selectable_label(mode == ViewMode::Split, "🌓 Split").clicked() {
+            if ui.selectable_label(mode == ViewMode::Split, "Split").clicked() {
                 state.view_mode = ViewMode::Split;
             }
-            if ui.selectable_label(mode == ViewMode::EditOnly, "✏ Edit").clicked() {
+            if ui.selectable_label(mode == ViewMode::EditOnly, "Edit").clicked() {
                 state.view_mode = ViewMode::EditOnly;
             }
 
@@ -65,7 +65,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             if state.editor_dirty {
                 ui.label(RichText::new("● Unsaved").color(ACCENT_PURPLE_LIGHT).size(11.0));
             } else {
-                ui.label(RichText::new("✓ Saved").color(TEXT_FAINT).size(11.0));
+                ui.label(RichText::new("Saved").color(TEXT_FAINT).size(11.0));
             }
         });
     });
@@ -160,7 +160,7 @@ fn render_link_autocomplete(
                     .show(ui, |ui| {
                         ui.label(RichText::new("Link to note:").color(TEXT_MUTED).size(11.0));
                         for note_name in matches {
-                            if ui.button(RichText::new(format!("📄 [[{}]]", note_name)).color(ACCENT_PURPLE_LIGHT)).clicked() {
+                            if ui.button(RichText::new(format!("[[{}]]", note_name)).color(ACCENT_PURPLE_LIGHT)).clicked() {
                                 chosen_note = Some(note_name);
                             }
                         }
@@ -241,7 +241,7 @@ fn render_preview(ui: &mut Ui, state: &mut AppState, width: f32) {
                                 .inner_margin(Margin::symmetric(10, 6))
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
-                                        ui.label(RichText::new("▎").color(ACCENT_PURPLE));
+                                        ui.label(RichText::new("|").strong().color(ACCENT_PURPLE));
                                         render_inline_spans(ui, text, &mut note_to_open);
                                     });
                                 });

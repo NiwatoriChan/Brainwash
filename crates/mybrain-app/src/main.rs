@@ -62,44 +62,57 @@ impl eframe::App for MyBrainApp {
         let ctx = ui.ctx().clone();
         self.handle_keyboard_shortcuts(&ctx);
 
+        let tokens = theme::Tokens::get(&ctx);
+
         // Top Navigation Menu Bar
         egui::Panel::top("top_bar")
             .frame(
                 Frame::NONE
-                    .fill(theme::BG_PANEL)
-                    .stroke(Stroke::new(1.0, theme::BORDER_COLOR))
-                    .inner_margin(Margin::symmetric(12, 8)),
+                    .fill(tokens.chrome)
+                    .stroke(Stroke::new(1.0, tokens.separator))
+                    .inner_margin(Margin::symmetric(14, 8)),
             )
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("🧠 MyBrain").strong().size(15.0).color(theme::TEXT_PRIMARY));
+                    ui.label(
+                        RichText::new("MyBrain")
+                            .strong()
+                            .size(16.0)
+                            .color(tokens.text),
+                    );
+                    ui.label(
+                        RichText::new("v0.1")
+                            .size(10.0)
+                            .color(tokens.text_faint),
+                    );
+
                     ui.separator();
 
-                    if ui.button("📄 Notes").clicked() {
+                    if ui.selectable_label(self.state.main_tab == MainTab::Notes, "Notes").clicked() {
                         self.state.main_tab = MainTab::Notes;
                     }
-                    if ui.button("📅 Daily Notes").clicked() {
+                    if ui.button("Daily Notes").clicked() {
                         self.state.open_daily_today();
                     }
-                    if ui.button("🗓 Calendar & Events").clicked() {
+                    if ui.selectable_label(self.state.main_tab == MainTab::Events, "Calendar").clicked() {
                         self.state.main_tab = MainTab::Events;
                     }
 
                     ui.separator();
 
-                    if ui.button(RichText::new("+ Note (Ctrl+N)").color(theme::ACCENT_PURPLE_LIGHT)).clicked() {
+                    if ui.button(RichText::new("+ Note (Ctrl+N)").color(tokens.accent_text)).clicked() {
                         self.state.show_new_note_dialog = true;
                     }
-                    if ui.button(RichText::new("⚡ Quick Note (Ctrl+Q)").color(theme::ACCENT_AMBER)).clicked() {
+                    if ui.button(RichText::new("+ Quick Note (Ctrl+Q)").color(tokens.warning)).clicked() {
                         self.state.show_quick_capture = true;
                     }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // Toggle backlinks panel
                         let bl_label = if self.state.show_backlinks {
-                            "Hide Connections ⮞"
+                            "Hide Links →"
                         } else {
-                            "⮜ Connections"
+                            "← Links"
                         };
                         if ui.selectable_label(self.state.show_backlinks, bl_label).clicked() {
                             self.state.show_backlinks = !self.state.show_backlinks;
@@ -107,12 +120,29 @@ impl eframe::App for MyBrainApp {
 
                         ui.separator();
 
-                        if ui.button(RichText::new("🔍 Search (Ctrl+P)").color(theme::TEXT_MUTED)).clicked() {
+                        // Theme switcher
+                        let mut changed_theme = None;
+                        ui.menu_button(format!("Theme: {}", self.state.theme_kind.label()), |ui| {
+                            for kind in theme::ThemeKind::ALL {
+                                if ui.selectable_label(self.state.theme_kind == kind, kind.label()).clicked() {
+                                    changed_theme = Some(kind);
+                                    ui.close();
+                                }
+                            }
+                        });
+                        if let Some(kind) = changed_theme {
+                            self.state.theme_kind = kind;
+                            theme::apply_theme(&ctx, kind);
+                        }
+
+                        ui.separator();
+
+                        if ui.button(RichText::new("Search (Ctrl+P)").color(tokens.text_dim)).clicked() {
                             self.state.show_command_palette = true;
                         }
 
                         if self.state.editor_dirty {
-                            if ui.button(RichText::new("💾 Save (Ctrl+S)").color(theme::ACCENT_PURPLE_LIGHT)).clicked() {
+                            if ui.button(RichText::new("Save (Ctrl+S)").color(tokens.accent_text).strong()).clicked() {
                                 self.state.save_current();
                             }
                         }
@@ -214,7 +244,8 @@ fn main() -> eframe::Result {
         "MyBrain",
         options,
         Box::new(|cc| {
-            theme::apply_theme(&cc.egui_ctx);
+            theme::install_fonts(&cc.egui_ctx);
+            theme::apply_theme(&cc.egui_ctx, state.theme_kind);
             Ok(Box::new(MyBrainApp::new(state)))
         }),
     )

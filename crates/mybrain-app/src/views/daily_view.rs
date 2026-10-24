@@ -4,16 +4,15 @@ use chrono::Local;
 use egui::{CornerRadius, Frame, Margin, RichText, ScrollArea, Stroke, Ui};
 
 use crate::state::AppState;
-use crate::theme::{
-    ACCENT_PURPLE, ACCENT_PURPLE_LIGHT, BG_CARD, BG_HOVER, BORDER_COLOR, TEXT_FAINT, TEXT_MUTED,
-    TEXT_PRIMARY,
-};
+use crate::theme::Tokens;
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
+    let t = Tokens::get(ui.ctx());
+
     ui.horizontal(|ui| {
-        ui.heading(RichText::new("📅 Daily Notes").color(TEXT_PRIMARY).strong());
+        ui.heading(RichText::new("Daily Notes").color(t.text).strong());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button(RichText::new("Today").color(ACCENT_PURPLE_LIGHT)).clicked() {
+            if ui.button(RichText::new("Today").color(t.accent_text)).clicked() {
                 state.open_daily_today();
             }
         });
@@ -23,25 +22,25 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     // Date switcher buttons: Previous Day, Selected Date, Next Day
     ui.horizontal(|ui| {
-        if ui.button("◀ Previous Day").clicked() {
+        if ui.button("← Previous Day").clicked() {
             state.shift_daily_date(-1);
         }
 
         let date_str = state.selected_daily_date.format("%A, %B %-d, %Y").to_string();
-        ui.label(RichText::new(date_str).strong().color(ACCENT_PURPLE_LIGHT));
+        ui.label(RichText::new(date_str).strong().color(t.accent_text));
 
-        if ui.button("Next Day ▶").clicked() {
+        if ui.button("Next Day →").clicked() {
             state.shift_daily_date(1);
         }
     });
 
     ui.add_space(8.0);
-    ui.label(RichText::new("Existing Daily Notes").color(TEXT_MUTED).size(12.0));
+    ui.label(RichText::new("Existing Daily Notes").color(t.text_dim).size(12.0));
 
     ScrollArea::vertical().id_salt("daily_list_scroll").show(ui, |ui| {
         let existing = state.daily_config.existing_dates(&state.vault);
         if existing.is_empty() {
-            ui.label(RichText::new("No daily notes yet. Click Today above to create your first!").color(TEXT_FAINT));
+            ui.label(RichText::new("No daily notes yet. Click Today above to create your first!").color(t.text_faint));
         } else {
             // Sort in reverse chronological order
             let mut dates: Vec<_> = existing.into_iter().collect();
@@ -53,26 +52,26 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 let is_active = state.active_note.as_ref() == Some(&id);
 
                 let mut frame = Frame::NONE
-                    .fill(BG_CARD)
-                    .stroke(Stroke::new(1.0, if is_active { ACCENT_PURPLE } else { BORDER_COLOR }))
-                    .corner_radius(CornerRadius::same(6))
+                    .fill(t.card)
+                    .stroke(Stroke::new(1.0, if is_active { t.accent_border } else { t.card_border }))
+                    .corner_radius(CornerRadius::same(t.radius_sm as u8))
                     .inner_margin(Margin::same(8));
 
                 if is_active {
-                    frame = frame.fill(BG_HOVER);
+                    frame = frame.fill(t.hover);
                 }
 
                 frame.show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(date.format("%Y-%m-%d").to_string()).strong().color(TEXT_PRIMARY));
-                        ui.label(RichText::new(date.format("%A").to_string()).color(TEXT_MUTED).size(12.0));
+                        ui.label(RichText::new(date.format("%Y-%m-%d").to_string()).strong().color(t.text));
+                        ui.label(RichText::new(date.format("%A").to_string()).color(t.text_dim).size(12.0));
 
                         if is_today {
-                            ui.label(RichText::new("Today").color(ACCENT_PURPLE_LIGHT).size(11.0));
+                            ui.label(RichText::new("Today").color(t.accent_text).size(11.0));
                         }
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button(RichText::new("Open ↗").color(ACCENT_PURPLE_LIGHT)).clicked() {
+                            if ui.button(RichText::new("Open →").color(t.accent_text)).clicked() {
                                 state.open_daily_date(date);
                             }
                         });

@@ -4,20 +4,17 @@ use egui::{CornerRadius, Frame, Margin, RichText, ScrollArea, Stroke, Ui};
 use mybrain_core::NoteId;
 
 use crate::state::{AppState, MainTab};
-use crate::theme::{
-    ACCENT_AMBER, ACCENT_GREEN, ACCENT_PURPLE, ACCENT_PURPLE_LIGHT, BG_CARD, BG_HOVER,
-    BORDER_COLOR, TEXT_FAINT, TEXT_MUTED, TEXT_PRIMARY,
-};
+use crate::theme::Tokens;
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
+    let t = Tokens::get(ui.ctx());
     ui.spacing_mut().item_spacing.y = 8.0;
 
     // Header brand
     ui.horizontal(|ui| {
-        ui.label(RichText::new("🧠").size(20.0));
-        ui.heading(RichText::new("MyBrain").color(TEXT_PRIMARY).strong().size(18.0));
+        ui.heading(RichText::new("MyBrain").color(t.text).strong().size(18.0));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button(RichText::new("⚡ Capture").color(ACCENT_AMBER)).on_hover_text("Quick capture thought (Ctrl+Q)").clicked() {
+            if ui.button(RichText::new("+ Capture").color(t.warning)).on_hover_text("Quick capture thought (Ctrl+Q)").clicked() {
                 state.show_quick_capture = true;
             }
         });
@@ -28,46 +25,46 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     // Mode Selector (Notes / Daily / Events)
     ui.horizontal(|ui| {
         let tab = state.main_tab;
-        if ui.selectable_label(tab == MainTab::Notes, "📄 Notes").clicked() {
+        if ui.selectable_label(tab == MainTab::Notes, "Notes").clicked() {
             state.main_tab = MainTab::Notes;
         }
-        if ui.selectable_label(tab == MainTab::Daily, "📅 Daily").clicked() {
+        if ui.selectable_label(tab == MainTab::Daily, "Daily").clicked() {
             state.open_daily_today();
         }
-        if ui.selectable_label(tab == MainTab::Events, "🗓 Events").clicked() {
+        if ui.selectable_label(tab == MainTab::Events, "Events").clicked() {
             state.main_tab = MainTab::Events;
         }
     });
 
     // Quick Action Bar
     ui.horizontal(|ui| {
-        if ui.button(RichText::new("+ Note").color(ACCENT_PURPLE_LIGHT)).clicked() {
+        if ui.button(RichText::new("+ Note").color(t.accent_text)).clicked() {
             state.show_new_note_dialog = true;
         }
-        if ui.button(RichText::new("+ Event").color(ACCENT_GREEN)).clicked() {
+        if ui.button(RichText::new("+ Event").color(t.success)).clicked() {
             state.show_new_event_dialog = true;
         }
-        if ui.button(RichText::new("🔍 Find").color(TEXT_MUTED)).on_hover_text("Command palette (Ctrl+P)").clicked() {
+        if ui.button(RichText::new("Find").color(t.text_dim)).on_hover_text("Command palette (Ctrl+P)").clicked() {
             state.show_command_palette = true;
         }
     });
 
     // Search Box
     Frame::NONE
-        .fill(BG_CARD)
-        .corner_radius(CornerRadius::same(6))
-        .stroke(Stroke::new(1.0, BORDER_COLOR))
+        .fill(t.field)
+        .corner_radius(CornerRadius::same(t.radius_sm as u8))
+        .stroke(Stroke::new(1.0, t.field_border))
         .inner_margin(Margin::symmetric(8, 4))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("🔎").color(TEXT_FAINT));
+                ui.label(RichText::new("/").color(t.text_faint).strong());
                 ui.add(
                     egui::TextEdit::singleline(&mut state.search_query)
                         .hint_text("Filter notes...")
                         .frame(Frame::NONE)
                         .desired_width(f32::INFINITY),
                 );
-                if !state.search_query.is_empty() && ui.small_button("✕").clicked() {
+                if !state.search_query.is_empty() && ui.small_button("×").clicked() {
                     state.search_query.clear();
                 }
             });
@@ -87,7 +84,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .collect()
     };
 
-    ui.label(RichText::new(format!("Notes ({})", note_ids.len())).color(TEXT_MUTED).size(11.0));
+    ui.label(RichText::new(format!("Notes ({})", note_ids.len())).color(t.text_dim).size(11.0));
 
     ScrollArea::vertical().id_salt("sidebar_notes_scroll").show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 2.0;
@@ -97,29 +94,29 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             let title = id.name();
             let folder = id.folder();
 
-            let mut frame = Frame::NONE.corner_radius(CornerRadius::same(4)).inner_margin(Margin::symmetric(6, 4));
+            let mut frame = Frame::NONE.corner_radius(CornerRadius::same(t.radius_sm as u8)).inner_margin(Margin::symmetric(6, 4));
             if is_selected {
-                frame = frame.fill(BG_HOVER).stroke(Stroke::new(1.0, ACCENT_PURPLE));
+                frame = frame.fill(t.hover).stroke(Stroke::new(1.0, t.accent_border));
             }
 
             frame.show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    let icon = if id.as_str().starts_with("Daily/") {
-                        "📅"
+                    let (badge, badge_color) = if id.as_str().starts_with("Daily/") {
+                        ("[D]", t.accent_text)
                     } else if id.as_str().starts_with("Events/") {
-                        "🗓"
+                        ("[E]", t.warning)
                     } else if id.as_str().starts_with("Quick Notes/") {
-                        "⚡"
+                        ("[Q]", t.success)
                     } else {
-                        "📄"
+                        ("•", t.text_dim)
                     };
 
-                    ui.label(RichText::new(icon).size(13.0));
+                    ui.label(RichText::new(badge).color(badge_color).size(11.0).monospace());
 
                     let label_text = if is_selected {
-                        RichText::new(title).color(ACCENT_PURPLE_LIGHT).strong()
+                        RichText::new(title).color(t.accent_text).strong()
                     } else {
-                        RichText::new(title).color(TEXT_PRIMARY)
+                        RichText::new(title).color(t.text)
                     };
 
                     let response = ui.selectable_label(is_selected, label_text);
@@ -129,7 +126,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
                     if let Some(f) = folder {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(RichText::new(f).color(TEXT_FAINT).size(10.0));
+                            ui.label(RichText::new(f).color(t.text_faint).size(10.0));
                         });
                     }
                 });
@@ -142,10 +139,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         ui.separator();
         ui.horizontal(|ui| {
             let total_notes = state.vault.len();
-            ui.label(RichText::new(format!("{total_notes} notes")).color(TEXT_FAINT).size(11.0));
+            ui.label(RichText::new(format!("{total_notes} notes")).color(t.text_faint).size(11.0));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if let Some((msg, _)) = &state.status {
-                    ui.label(RichText::new(msg).color(ACCENT_PURPLE_LIGHT).size(11.0));
+                    ui.label(RichText::new(msg).color(t.accent_text).size(11.0));
                 }
             });
         });

@@ -60,6 +60,9 @@ pub struct AppState {
     // Daily notes navigation date
     pub selected_daily_date: NaiveDate,
 
+    // Theme
+    pub theme_kind: crate::theme::ThemeKind,
+
     // Transient UI toast/status
     pub status: Option<(String, Instant)>,
 }
@@ -76,7 +79,7 @@ impl AppState {
         // If vault is completely empty, create a welcome note!
         if vault.is_empty() {
             let welcome_id = NoteId::new("Welcome to MyBrain")?;
-            let welcome_content = r#"# Welcome to MyBrain 🧠
+            let welcome_content = r#"# Welcome to MyBrain
 
 MyBrain is a local-first, distraction-free **knowledge base** powered by Rust and egui.
 
@@ -121,6 +124,7 @@ MyBrain is a local-first, distraction-free **knowledge base** powered by Rust an
             show_new_event_dialog: false,
             new_event_draft: EventDraft::new(today),
             selected_daily_date: today,
+            theme_kind: crate::theme::ThemeKind::Studio,
             status: Some(("Welcome to MyBrain".to_string(), Instant::now())),
         };
 

@@ -4,15 +4,14 @@ use egui::{CornerRadius, Frame, Margin, RichText, Stroke, Window};
 use mybrain_core::NoteId;
 
 use crate::state::AppState;
-use crate::theme::{
-    ACCENT_AMBER, ACCENT_PURPLE_LIGHT, BG_CARD, TEXT_FAINT, TEXT_MUTED,
-};
+use crate::theme::Tokens;
 
 pub fn show(ctx: &egui::Context, state: &mut AppState) {
     if !state.show_quick_capture {
         return;
     }
 
+    let t = Tokens::get(ctx);
     let mut open = true;
     let mut should_close = false;
     let mut should_capture = false;
@@ -25,7 +24,7 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
         .map(|n| n.id.clone())
         .collect();
 
-    Window::new("⚡ Quick Note Capture")
+    Window::new("Quick Note Capture")
         .open(&mut open)
         .resizable(false)
         .collapsible(false)
@@ -34,20 +33,20 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
         .anchor(egui::Align2::CENTER_CENTER, [0.0, -50.0])
         .frame(
             Frame::NONE
-                .fill(BG_CARD)
-                .stroke(Stroke::new(1.5, ACCENT_AMBER))
-                .corner_radius(CornerRadius::same(10))
+                .fill(t.card)
+                .stroke(Stroke::new(1.5, t.warning))
+                .corner_radius(CornerRadius::same(t.radius_lg as u8))
                 .inner_margin(Margin::same(16)),
         )
         .show(ctx, |ui| {
             ui.label(
                 RichText::new("Quickly record a thought, task, or snippet.")
-                    .color(TEXT_MUTED)
+                    .color(t.text_dim)
                     .size(12.0),
             );
             ui.label(
                 RichText::new("It will be saved as a separate note and linked in today's Daily Note!")
-                    .color(TEXT_FAINT)
+                    .color(t.text_faint)
                     .size(11.0),
             );
 
@@ -67,7 +66,7 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
             ui.add_space(10.0);
 
             ui.horizontal(|ui| {
-                if ui.button(RichText::new("⚡ Save Thought").color(ACCENT_AMBER).strong()).clicked() {
+                if ui.button(RichText::new("Save Thought").color(t.warning).strong()).clicked() {
                     should_capture = true;
                 }
 
@@ -76,7 +75,7 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(RichText::new("Ctrl+Enter to save").color(TEXT_FAINT).size(10.0));
+                    ui.label(RichText::new("Ctrl+Enter to save").color(t.text_faint).size(10.0));
                 });
             });
 
@@ -85,9 +84,9 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
 
             // Recent quick notes
             if !recent.is_empty() {
-                ui.label(RichText::new("Recent Quick Notes").color(TEXT_MUTED).size(11.0));
+                ui.label(RichText::new("Recent Quick Notes").color(t.text_dim).size(11.0));
                 for id in recent {
-                    if ui.button(RichText::new(format!("• {}", id.name())).color(ACCENT_PURPLE_LIGHT)).clicked() {
+                    if ui.button(RichText::new(format!("• {}", id.name())).color(t.accent_text)).clicked() {
                         note_to_open = Some(id);
                         should_close = true;
                     }
