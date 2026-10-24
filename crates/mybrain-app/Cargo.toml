@@ -1,13 +1,13 @@
 [package]
 name = "mybrain-app"
-description = "egui desktop front-end for MyBrain."
+description = "egui desktop front-end for Brainwash."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [[bin]]
-name = "mybrain"
+name = "brainwash"
 path = "src/main.rs"
 
 [dependencies]

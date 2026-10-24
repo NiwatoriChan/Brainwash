@@ -12,7 +12,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     // Header brand
     ui.horizontal(|ui| {
-        ui.heading(RichText::new("MyBrain").color(t.text).strong().size(18.0));
+        ui.heading(RichText::new("Brainwash").color(t.text).strong().size(18.0));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.button(RichText::new("+ Capture").color(t.warning)).on_hover_text("Quick capture thought (Ctrl+Q)").clicked() {
                 state.show_quick_capture = true;

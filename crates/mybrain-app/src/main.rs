@@ -19,11 +19,11 @@ use eframe::egui;
 use egui::{Frame, Margin, RichText, Stroke};
 use state::{AppState, MainTab};
 
-struct MyBrainApp {
+struct BrainwashApp {
     state: AppState,
 }
 
-impl MyBrainApp {
+impl BrainwashApp {
     fn new(state: AppState) -> Self {
         Self { state }
     }
@@ -57,7 +57,7 @@ impl MyBrainApp {
     }
 }
 
-impl eframe::App for MyBrainApp {
+impl eframe::App for BrainwashApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.handle_keyboard_shortcuts(&ctx);
@@ -75,7 +75,7 @@ impl eframe::App for MyBrainApp {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new("MyBrain")
+                        RichText::new("Brainwash")
                             .strong()
                             .size(16.0)
                             .color(tokens.text),
@@ -213,7 +213,7 @@ impl eframe::App for MyBrainApp {
 
 fn determine_vault_dir() -> PathBuf {
     if let Some(mut home) = dirs::home_dir() {
-        home.push("MyBrainVault");
+        home.push("BrainwashVault");
         home
     } else {
         PathBuf::from("./vault")
@@ -234,19 +234,19 @@ fn main() -> eframe::Result {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("MyBrain")
+            .with_title("Brainwash")
             .with_inner_size([1200.0, 800.0])
             .with_min_inner_size([720.0, 480.0]),
         ..Default::default()
     };
 
     eframe::run_native(
-        "MyBrain",
+        "Brainwash",
         options,
         Box::new(|cc| {
             theme::install_fonts(&cc.egui_ctx);
             theme::apply_theme(&cc.egui_ctx, state.theme_kind);
-            Ok(Box::new(MyBrainApp::new(state)))
+            Ok(Box::new(BrainwashApp::new(state)))
         }),
     )
 }

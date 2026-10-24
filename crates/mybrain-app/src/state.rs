@@ -78,10 +78,10 @@ impl AppState {
 
         // If vault is completely empty, create a welcome note!
         if vault.is_empty() {
-            let welcome_id = NoteId::new("Welcome to MyBrain")?;
-            let welcome_content = r#"# Welcome to MyBrain
+            let welcome_id = NoteId::new("Welcome to Brainwash")?;
+            let welcome_content = r#"# Welcome to Brainwash
 
-MyBrain is a local-first, distraction-free **knowledge base** powered by Rust and egui.
+Brainwash is a local-first, distraction-free **knowledge base** powered by Rust and egui.
 
 ## Features
 - **Double-brackets [[Wiki Links]]**: Connect notes seamlessly like Obsidian. Try clicking [[Daily Notes]] or [[Quick Notes]]!
@@ -125,7 +125,7 @@ MyBrain is a local-first, distraction-free **knowledge base** powered by Rust an
             new_event_draft: EventDraft::new(today),
             selected_daily_date: today,
             theme_kind: crate::theme::ThemeKind::Studio,
-            status: Some(("Welcome to MyBrain".to_string(), Instant::now())),
+            status: Some(("Welcome to Brainwash".to_string(), Instant::now())),
         };
 
         let first_id = state.vault.notes().next().map(|n| n.id.clone());
