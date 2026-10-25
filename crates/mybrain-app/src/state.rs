@@ -865,4 +865,52 @@ mod tests {
         assert_eq!(state.top_mode, TopBarMode::Notes);
         assert_eq!(state.active_note.as_ref(), Some(&id));
     }
+
+    #[test]
+    fn test_create_event_integrates_into_daily_note() {
+        let (_tmp, mut state) = temp_app_state();
+        let event_date = NaiveDate::from_ymd_opt(2026, 10, 25).unwrap();
+        state.new_event_draft = EventDraft {
+            title: "Client Meeting".into(),
+            date: event_date,
+            start: chrono::NaiveTime::from_hms_opt(14, 0, 0),
+            end: chrono::NaiveTime::from_hms_opt(15, 0, 0),
+            location: "Room 101".into(),
+            description: "Discuss Q4 objectives.".into(),
+        };
+        state.create_event();
+
+        // 1. Event note created and active in editor
+        assert!(state.active_note.is_some());
+        assert_eq!(state.sidebar_section, SidebarSection::Notes);
+
+        // 2. Daily note created and has event bullet integrated
+        let daily_id = state.daily_config.id_for(event_date);
+        let daily_note = state.vault.get(&daily_id).expect("daily note should be auto-created");
+        assert!(daily_note.content.contains("Client Meeting"));
+        assert!(daily_note.content.contains("14:00 – 15:00"));
+    }
+
+    #[test]
+    fn test_sync_events_to_daily_note() {
+        let (_tmp, mut state) = temp_app_state();
+        let event_date = NaiveDate::from_ymd_opt(2026, 10, 26).unwrap();
+        let draft = EventDraft {
+            title: "Dentist".into(),
+            date: event_date,
+            start: chrono::NaiveTime::from_hms_opt(9, 30, 0),
+            end: None,
+            location: "".into(),
+            description: "".into(),
+        };
+        let _ = state.event_store.create(&mut state.vault, &draft);
+
+        // Sync to daily note
+        state.sync_events_to_daily_note(event_date);
+
+        let daily_id = state.daily_config.id_for(event_date);
+        let daily_note = state.vault.get(&daily_id).expect("daily note created");
+        assert!(daily_note.content.contains("Dentist"));
+        assert!(daily_note.content.contains("09:30"));
+    }
 }
