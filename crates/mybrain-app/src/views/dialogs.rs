@@ -134,7 +134,7 @@ pub fn show_new_event(ctx: &egui::Context, state: &mut AppState) {
         ui.set_width(440.0);
 
         ui.horizontal(|ui| {
-            ui.heading(RichText::new("New Calendar Event").color(t.text).strong().size(16.0));
+            ui.heading(RichText::new("Insert Event Object").color(t.text).strong().size(16.0));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if theme::icon_close_button(ui, &t).clicked() {
                     should_close = true;
@@ -142,7 +142,16 @@ pub fn show_new_event(ctx: &egui::Context, state: &mut AppState) {
             });
         });
 
-        ui.add_space(10.0);
+        ui.add_space(4.0);
+
+        let target_desc = if let Some(active) = &state.active_note {
+            format!("Inserts into active note: [[{}]]", active.name())
+        } else {
+            format!("Inserts into daily note: [[Daily/{}]]", state.new_event_draft.date.format("%Y-%m-%d"))
+        };
+        theme::pill(ui, &target_desc, t.accent_text, t.accent_soft);
+
+        ui.add_space(8.0);
 
         ui.label(RichText::new("Title").color(t.text_dim).size(12.0));
         field_frame(&t).show(ui, |ui| {
@@ -245,7 +254,7 @@ pub fn show_new_event(ctx: &egui::Context, state: &mut AppState) {
             let can_save = !state.new_event_draft.title.trim().is_empty();
             if ui.add_enabled(
                 can_save,
-                egui::Button::new(RichText::new("Save Event").color(Color32::WHITE).strong())
+                egui::Button::new(RichText::new("Insert Event Object").color(Color32::WHITE).strong())
                     .fill(t.success)
                     .stroke(Stroke::NONE)
                     .corner_radius(CornerRadius::same(t.radius_sm as u8)),

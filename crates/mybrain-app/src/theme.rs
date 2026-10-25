@@ -603,6 +603,27 @@ pub fn icon_pin(ui: &mut Ui, size: f32, color: Color32) -> Response {
     resp
 }
 
+/// Paint a clean vector image/photo icon that never produces tofu.
+pub fn icon_image(ui: &mut Ui, size: f32, color: Color32) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        let stroke = Stroke::new(1.2, color);
+        let inner = rect.shrink(1.0);
+        painter.rect_stroke(inner, CornerRadius::same(2), stroke, egui::StrokeKind::Inside);
+        // Sun
+        let sun_pos = pos2(inner.left() + inner.width() * 0.32, inner.top() + inner.height() * 0.35);
+        painter.circle_filled(sun_pos, size * 0.12, color);
+        // Mountains
+        let p1 = pos2(inner.left() + 1.5, inner.bottom() - 1.5);
+        let p2 = pos2(inner.left() + inner.width() * 0.45, inner.top() + inner.height() * 0.50);
+        let p3 = pos2(inner.left() + inner.width() * 0.72, inner.bottom() - 1.5);
+        painter.line_segment([p1, p2], stroke);
+        painter.line_segment([p2, p3], stroke);
+    }
+    resp
+}
+
 /// Clickable pushpin button that never produces tofu.
 pub fn icon_pin_button(ui: &mut Ui, t: &Tokens, is_pinned: bool) -> Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());

@@ -55,7 +55,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                                 ui.label(RichText::new("No upcoming events scheduled.").color(t.text_dim).size(14.0));
                                 ui.add_space(6.0);
                                 ui.label(
-                                    RichText::new("Create an event using '+ New Event' or add frontmatter `type: event` in any note.")
+                                    RichText::new("Add an ```event object block to any note or click '+ New Event'.")
                                         .color(t.text_faint)
                                         .size(12.0),
                                 );
@@ -110,11 +110,17 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                                 // Details column
                                 ui.vertical(|ui| {
                                     ui.label(RichText::new(&event.title).size(14.5).strong().color(t.text));
-                                    if let Some(loc) = &event.location {
-                                        ui.horizontal(|ui| {
+                                    ui.horizontal(|ui| {
+                                        theme::pill(ui, &format!("in [[{}]]", event.id.name()), t.accent_text, t.accent_soft);
+                                        if let Some(loc) = &event.location {
                                             theme::icon_pin(ui, 12.0, t.text_dim);
                                             ui.label(RichText::new(loc).color(t.text_dim).size(11.5));
-                                        });
+                                        }
+                                    });
+                                    if let Some(desc) = &event.description {
+                                        if !desc.is_empty() {
+                                            ui.label(RichText::new(desc).color(t.text_dim).size(11.5).italics());
+                                        }
                                     }
                                 });
 

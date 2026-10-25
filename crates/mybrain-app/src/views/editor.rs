@@ -9,6 +9,7 @@ use mybrain_core::markdown::{
     parse_blocks, parse_inline, toggle_task, Block, Inline, ListMarker,
 };
 use mybrain_core::vault::Vault;
+use mybrain_core::NoteId;
 
 use crate::state::{AppState, ViewMode};
 use crate::theme::{self, Tokens};
@@ -123,6 +124,49 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         state.delete_current_note();
                         return;
                     }
+
+                    // + Insert Object dropdown menu
+                    ui.menu_button(
+                        RichText::new("+ Insert ▾").color(t.accent_text).size(12.0).strong(),
+                        |ui| {
+                            ui.set_min_width(175.0);
+                            if ui.button("📅 Event Object").clicked() {
+                                let today = chrono::Local::now().date_naive();
+                                let snippet = format!(
+                                    "```event\ntitle: New Event\ndate: {}\ntime: 10:00 - 11:00\nlocation: Room A\ndescription: Agenda details\n```\n",
+                                    today.format("%Y-%m-%d")
+                                );
+                                state.insert_snippet_into_active_note(&snippet);
+                                ui.close();
+                            }
+                            if ui.button("🔍 Query Object").clicked() {
+                                let snippet = "```query\nevents\n```\n";
+                                state.insert_snippet_into_active_note(snippet);
+                                ui.close();
+                            }
+                            ui.separator();
+                            if ui.button("☑ Task Item").clicked() {
+                                state.insert_snippet_into_active_note("- [ ] ");
+                                ui.close();
+                            }
+                            if ui.button("🔗 Note Link").clicked() {
+                                state.insert_snippet_into_active_note("[[]]");
+                                ui.close();
+                            }
+                            if ui.button("🖼 Image").clicked() {
+                                state.insert_snippet_into_active_note("![Alt text](image.png)");
+                                ui.close();
+                            }
+                            if ui.button("💡 Note Callout").clicked() {
+                                state.insert_snippet_into_active_note("> [!NOTE]\n> Key takeaway or important reminder.\n");
+                                ui.close();
+                            }
+                            if ui.button("📊 Table").clicked() {
+                                state.insert_snippet_into_active_note("| Column 1 | Column 2 |\n| --- | --- |\n| Value 1 | Value 2 |\n");
+                                ui.close();
+                            }
+                        },
+                    );
 
                     ui.separator();
 
@@ -253,6 +297,17 @@ fn render_editor_pane(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
                     .layouter(&mut layouter)
                     .frame(Frame::NONE)
                     .show(ui);
+
+                if let Some(cursor_range) = output.cursor_range {
+                    let cursor_char_idx = cursor_range.primary.index.0;
+                    let byte_offset = state
+                        .editor_buffer
+                        .char_indices()
+                        .nth(cursor_char_idx)
+                        .map(|(b, _)| b)
+                        .unwrap_or(state.editor_buffer.len());
+                    state.editor_cursor = byte_offset;
+                }
 
                 if output.response.changed() {
                     state.editor_dirty = true;
@@ -401,6 +456,8 @@ fn render_preview_pane(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
 
                         let mut task_to_toggle: Option<usize> = None;
                         let mut note_to_open: Option<String> = None;
+                        let mut date_to_open: Option<chrono::NaiveDate> = None;
+                        let mut open_agenda = false;
 
                         for item in blocks {
                             let line_no = item.line;
@@ -456,22 +513,44 @@ fn render_preview_pane(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
                                     ui.add_space(8.0);
                                 }
                                 Block::Code { lang, code } => {
-                                    Frame::NONE
-                                        .fill(t.dock)
-                                        .corner_radius(CornerRadius::same(t.radius_sm as u8))
-                                        .inner_margin(Margin::same(12))
-                                        .show(ui, |ui| {
-                                            if !lang.is_empty() {
-                                                ui.horizontal(|ui| {
-                                                    theme::pill(ui, &lang.to_uppercase(), t.text_faint, t.field);
+                                    if lang.eq_ignore_ascii_case("event") {
+                                        render_event_object_card(
+                                            ui,
+                                            state.active_note.as_ref(),
+                                            &code,
+                                            line_no,
+                                            t,
+                                            &mut date_to_open,
+                                            &mut open_agenda,
+                                        );
+                                    } else if lang.eq_ignore_ascii_case("query") {
+                                        render_query_object_card(
+                                            ui,
+                                            &state.vault,
+                                            &state.event_store,
+                                            &code,
+                                            line_no,
+                                            t,
+                                            &mut note_to_open,
+                                        );
+                                    } else {
+                                        Frame::NONE
+                                            .fill(t.dock)
+                                            .corner_radius(CornerRadius::same(t.radius_sm as u8))
+                                            .inner_margin(Margin::same(12))
+                                            .show(ui, |ui| {
+                                                if !lang.is_empty() {
+                                                    ui.horizontal(|ui| {
+                                                        theme::pill(ui, &lang.to_uppercase(), t.text_faint, t.field);
+                                                    });
+                                                    ui.add_space(4.0);
+                                                }
+                                                ScrollArea::horizontal().id_salt(format!("code_block_{line_no}")).show(ui, |ui| {
+                                                    ui.label(RichText::new(code.trim_end()).monospace().color(t.text).size(12.5));
                                                 });
-                                                ui.add_space(4.0);
-                                            }
-                                            ScrollArea::horizontal().id_salt(format!("code_block_{line_no}")).show(ui, |ui| {
-                                                ui.label(RichText::new(code.trim_end()).monospace().color(t.text).size(12.5));
                                             });
-                                        });
-                                    ui.add_space(8.0);
+                                        ui.add_space(8.0);
+                                    }
                                 }
                                 Block::Rule => {
                                     ui.add_space(10.0);
@@ -495,6 +574,16 @@ fn render_preview_pane(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
                         // If user clicked a [[wiki link]] in preview mode
                         if let Some(target) = note_to_open {
                             state.open_or_create(&target);
+                        }
+
+                        // If user clicked Daily Note in an event object
+                        if let Some(date) = date_to_open {
+                            state.open_daily_date(date);
+                        }
+
+                        // If user clicked Agenda in an event object
+                        if open_agenda {
+                            state.sidebar_section = crate::state::SidebarSection::Events;
                         }
 
                         ui.add_space(80.0);
@@ -747,6 +836,22 @@ fn render_inline_spans(
                         *note_to_open = Some(link.target.clone());
                     }
                 }
+                Inline::Image { alt, url } => {
+                    Frame::NONE
+                        .fill(t.dock)
+                        .stroke(Stroke::new(1.0, t.field_border))
+                        .corner_radius(CornerRadius::same(4))
+                        .inner_margin(Margin::symmetric(6, 2))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                theme::icon_image(ui, 12.0, t.accent_text);
+                                let display = if !alt.is_empty() { alt } else { url };
+                                ui.label(RichText::new(display).color(t.accent_text).size(12.0).italics());
+                            });
+                        })
+                        .response
+                        .on_hover_text(format!("Image: {url}"));
+                }
             }
         }
     });
@@ -830,4 +935,217 @@ fn highlight_markdown(text: &str, t: &Tokens) -> LayoutJob {
         }
     }
     job
+}
+
+/// Renders an embedded ```event ... ``` object card in live preview.
+fn render_event_object_card(
+    ui: &mut Ui,
+    active_note: Option<&NoteId>,
+    code: &str,
+    line_no: usize,
+    t: &Tokens,
+    open_daily: &mut Option<chrono::NaiveDate>,
+    open_agenda: &mut bool,
+) {
+    let dummy_id = active_note.cloned().unwrap_or_else(|| NoteId::new("Note").unwrap());
+    let dummy_note = mybrain_core::Note::new(dummy_id, "");
+    let lines: Vec<&str> = code.lines().collect();
+    let ev = mybrain_core::Event::parse_block(&dummy_note, line_no, &lines);
+
+    let Some(ev) = ev else {
+        Frame::NONE
+            .fill(t.dock)
+            .corner_radius(CornerRadius::same(t.radius_sm as u8))
+            .inner_margin(Margin::same(10))
+            .show(ui, |ui| {
+                ui.label(RichText::new(code).monospace().color(t.text_dim).size(12.0));
+            });
+        return;
+    };
+
+    Frame::NONE
+        .fill(t.card)
+        .stroke(Stroke::new(1.5, t.warning))
+        .corner_radius(CornerRadius::same(t.radius as u8))
+        .inner_margin(Margin::symmetric(14, 12))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                theme::pill(ui, "EVENT", Color32::WHITE, t.warning);
+                ui.label(RichText::new(&ev.title).size(14.0).strong().color(t.text));
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if theme::ghost_button(ui, t, RichText::new("Agenda ↗").color(t.warning).size(11.5)).clicked() {
+                        *open_agenda = true;
+                    }
+                    if theme::ghost_button(ui, t, RichText::new("Daily Note ↗").color(t.accent_text).size(11.5)).clicked() {
+                        *open_daily = Some(ev.date);
+                    }
+                });
+            });
+
+            ui.add_space(6.0);
+
+            ui.horizontal(|ui| {
+                theme::pill(ui, &ev.date.format("%a, %b %-d, %Y").to_string(), t.accent_text, t.accent_soft);
+                theme::pill(ui, &ev.time_label(), t.warning, t.accent_soft);
+                if let Some(loc) = &ev.location {
+                    theme::icon_pin(ui, 12.0, t.text_dim);
+                    ui.label(RichText::new(loc).size(12.0).color(t.text_dim));
+                }
+            });
+
+            if let Some(desc) = &ev.description {
+                if !desc.is_empty() {
+                    ui.add_space(4.0);
+                    ui.label(RichText::new(desc).size(12.0).color(t.text_dim).italics());
+                }
+            }
+        });
+
+    ui.add_space(8.0);
+}
+
+/// Renders a dynamic ```query ... ``` object card in live preview.
+fn render_query_object_card(
+    ui: &mut Ui,
+    vault: &Vault,
+    event_store: &mybrain_core::EventStore,
+    code: &str,
+    _line_no: usize,
+    t: &Tokens,
+    note_to_open: &mut Option<String>,
+) {
+    let query_trim = code.trim();
+    let query_lower = query_trim.to_lowercase();
+
+    Frame::NONE
+        .fill(t.card)
+        .stroke(Stroke::new(1.2, t.accent_border))
+        .corner_radius(CornerRadius::same(t.radius as u8))
+        .inner_margin(Margin::symmetric(14, 12))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                theme::pill(ui, "QUERY", t.accent_text, t.accent_soft);
+                ui.label(RichText::new(query_trim).monospace().size(12.5).color(t.text));
+            });
+
+            ui.add_space(8.0);
+
+            // Execute query against vault / events
+            if query_lower == "events" || query_lower.starts_with("events:") {
+                let all_events = event_store.all(vault);
+                if all_events.is_empty() {
+                    ui.label(RichText::new("No events found across vault.").color(t.text_faint).size(12.0).italics());
+                } else {
+                    for ev in all_events.iter().take(15) {
+                        ui.horizontal(|ui| {
+                            theme::pill(ui, &ev.date.format("%b %-d").to_string(), t.accent_text, t.accent_soft);
+                            theme::pill(ui, &ev.time_label(), t.warning, t.accent_soft);
+                            ui.label(RichText::new(&ev.title).strong().size(12.0).color(t.text));
+                            ui.label(RichText::new(format!("in [[{}]]", ev.id.name())).size(11.0).color(t.text_dim));
+                            if ui.link(RichText::new("Open →").size(11.0).color(t.accent_text)).clicked() {
+                                *note_to_open = Some(ev.id.name().to_string());
+                            }
+                        });
+                        ui.add_space(2.0);
+                    }
+                }
+            } else if query_lower == "todo" || query_lower == "tasks" {
+                let mut matches = Vec::new();
+                for note in vault.notes() {
+                    for line in note.content.lines() {
+                        let trimmed = line.trim();
+                        if trimmed.starts_with("- [ ]") {
+                            let task_text = trimmed.trim_start_matches("- [ ]").trim();
+                            matches.push((note.id.name().to_string(), task_text.to_string()));
+                            if matches.len() >= 20 {
+                                break;
+                            }
+                        }
+                    }
+                    if matches.len() >= 20 {
+                        break;
+                    }
+                }
+                if matches.is_empty() {
+                    ui.label(RichText::new("No open tasks found across notes.").color(t.text_faint).size(12.0).italics());
+                } else {
+                    for (note_name, task_desc) in matches {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("☐").color(t.text_dim).size(12.0));
+                            ui.label(RichText::new(task_desc).size(12.0).color(t.text));
+                            ui.label(RichText::new(format!("in [[{}]]", note_name)).size(11.0).color(t.text_dim));
+                            if ui.link(RichText::new("Open →").size(11.0).color(t.accent_text)).clicked() {
+                                *note_to_open = Some(note_name);
+                            }
+                        });
+                        ui.add_space(2.0);
+                    }
+                }
+            } else if let Some(tag_filter) = query_trim.strip_prefix("tag:") {
+                let clean_tag = tag_filter.trim().trim_start_matches('#');
+                let tag_needle = format!("#{clean_tag}");
+                let mut matched_notes = Vec::new();
+                for note in vault.notes() {
+                    let has_in_frontmatter = note.frontmatter().get("tags")
+                        .map(|tags| tags.split(',').any(|t| t.trim().eq_ignore_ascii_case(clean_tag)))
+                        .unwrap_or(false);
+                    let has_in_content = note.content.contains(&tag_needle);
+                    if has_in_frontmatter || has_in_content {
+                        matched_notes.push(note.id.name().to_string());
+                    }
+                }
+                if matched_notes.is_empty() {
+                    ui.label(RichText::new(format!("No notes tagged #{clean_tag}.")).color(t.text_faint).size(12.0).italics());
+                } else {
+                    for name in matched_notes {
+                        ui.horizontal(|ui| {
+                            theme::pill(ui, &format!("#{clean_tag}"), t.accent_text, t.accent_soft);
+                            if ui.link(RichText::new(format!("[[{name}]]")).size(12.5).color(t.accent_text)).clicked() {
+                                *note_to_open = Some(name);
+                            }
+                        });
+                        ui.add_space(2.0);
+                    }
+                }
+            } else if let Some(folder_filter) = query_trim.strip_prefix("folder:") {
+                let folder = folder_filter.trim();
+                let matched_notes: Vec<_> = vault.notes()
+                    .filter(|n| n.id.folder().map(|f| f.eq_ignore_ascii_case(folder)).unwrap_or(false))
+                    .map(|n| n.id.name().to_string())
+                    .collect();
+                if matched_notes.is_empty() {
+                    ui.label(RichText::new(format!("No notes found in folder '{folder}'.")).color(t.text_faint).size(12.0).italics());
+                } else {
+                    for name in matched_notes {
+                        ui.horizontal(|ui| {
+                            theme::pill(ui, folder, t.text_faint, t.field);
+                            if ui.link(RichText::new(format!("[[{name}]]")).size(12.5).color(t.accent_text)).clicked() {
+                                *note_to_open = Some(name);
+                            }
+                        });
+                        ui.add_space(2.0);
+                    }
+                }
+            } else {
+                let search_term = query_trim.strip_prefix("search:").unwrap_or(query_trim).trim();
+                let results = vault.search(search_term);
+                if results.is_empty() {
+                    ui.label(RichText::new(format!("No notes matching '{search_term}'.")).color(t.text_faint).size(12.0).italics());
+                } else {
+                    for hit in results.iter().take(10) {
+                        ui.vertical(|ui| {
+                            if ui.link(RichText::new(format!("[[{}]]", hit.id.name())).strong().size(12.5).color(t.accent_text)).clicked() {
+                                *note_to_open = Some(hit.id.name().to_string());
+                            }
+                            if let Some(snippet) = &hit.snippet {
+                                ui.label(RichText::new(snippet).color(t.text_dim).size(11.0));
+                            }
+                        });
+                        ui.add_space(3.0);
+                    }
+                }
+            }
+        });
+    ui.add_space(8.0);
 }

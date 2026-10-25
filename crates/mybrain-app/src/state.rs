@@ -54,6 +54,7 @@ pub struct AppState {
     // Active note & Editor
     pub active_note: Option<NoteId>,
     pub editor_buffer: String,
+    pub editor_cursor: usize,
     pub editor_dirty: bool,
     pub view_mode: ViewMode,
 
@@ -191,6 +192,7 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
             event_store,
             active_note: None,
             editor_buffer: String::new(),
+            editor_cursor: 0,
             editor_dirty: false,
             view_mode: ViewMode::Split,
             history: Vec::new(),
@@ -288,6 +290,7 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
 
         if let Some(note) = self.vault.get(&id) {
             self.editor_buffer = note.content.clone();
+            self.editor_cursor = self.editor_buffer.len();
             self.editor_dirty = false;
             self.active_note = Some(id.clone());
 
@@ -617,34 +620,60 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
         }
     }
 
+    pub fn insert_snippet_into_active_note(&mut self, snippet: &str) {
+        if self.active_note.is_none() {
+            self.set_status("No active note open to insert into.");
+            return;
+        }
+        let cursor = self.editor_cursor.min(self.editor_buffer.len());
+        let (left, right) = self.editor_buffer.split_at(cursor);
+        let mut new_buf = String::with_capacity(self.editor_buffer.len() + snippet.len() + 2);
+        new_buf.push_str(left);
+        if !left.is_empty() && !left.ends_with('\n') && (snippet.starts_with("```") || snippet.starts_with('#') || snippet.starts_with("- ")) {
+            new_buf.push('\n');
+        }
+        new_buf.push_str(snippet);
+        new_buf.push_str(right);
+        self.editor_buffer = new_buf;
+        self.editor_dirty = true;
+        self.editor_cursor = cursor + snippet.len();
+        self.set_status("Inserted object into note");
+    }
+
     pub fn create_event(&mut self) {
         let draft = self.new_event_draft.clone();
-        match self.event_store.create(&mut self.vault, &draft) {
-            Ok(id) => {
-                // Integrate directly into the daily note for that event's date
-                let time_str = match (draft.start, draft.end) {
-                    (Some(s), Some(e)) => format!("{} – {}", s.format("%H:%M"), e.format("%H:%M")),
-                    (Some(s), None) => s.format("%H:%M").to_string(),
-                    (None, _) => "All day".to_string(),
-                };
-                let event_bullet = format!("- [ ] **{}** [[{}]]\n", time_str, id.name());
-                if let Ok(daily_id) = self.daily_config.open_or_create(&mut self.vault, draft.date) {
-                    if let Some(daily_note) = self.vault.get(&daily_id) {
-                        if !daily_note.content.contains(&id.name()) {
-                            let _ = self.vault.append(&daily_id, &event_bullet);
-                        }
-                    }
-                }
-
-                self.link_index = LinkIndex::build(&self.vault);
-                self.show_new_event_dialog = false;
-                self.set_status("Event created and integrated into daily note!");
-                self.open_note(id);
-                self.top_mode = TopBarMode::Notes;
-                self.sidebar_section = SidebarSection::Notes;
-            }
-            Err(e) => self.set_status(format!("Invalid event: {e}")),
+        if let Err(e) = draft.validate() {
+            self.set_status(format!("Invalid event: {e}"));
+            return;
         }
+
+        let event_block = draft.render_block();
+
+        // Target note: if user is currently editing a note, insert into that note.
+        // Otherwise, insert into that date's daily note.
+        let target_id = if let Some(active) = &self.active_note {
+            active.clone()
+        } else {
+            match self.daily_config.open_or_create(&mut self.vault, draft.date) {
+                Ok(id) => id,
+                Err(e) => {
+                    self.set_status(format!("Failed to open daily note: {e}"));
+                    return;
+                }
+            }
+        };
+
+        if self.active_note.as_ref() == Some(&target_id) {
+            self.insert_snippet_into_active_note(&format!("\n{event_block}\n"));
+            self.save_current();
+        } else {
+            let _ = self.vault.append(&target_id, &format!("\n{event_block}\n"));
+            self.open_note(target_id.clone());
+        }
+
+        self.link_index = LinkIndex::build(&self.vault);
+        self.show_new_event_dialog = false;
+        self.set_status(format!("Added event object to [[{}]]", target_id.name()));
     }
 
     /// Appends or synchronizes scheduled events for `date` into that day's daily note.
@@ -667,8 +696,8 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
             let mut content = daily_note.content.clone();
             let mut added = 0;
             for ev in events {
-                if !content.contains(&ev.id.name()) {
-                    let bullet = format!("- [ ] **{}** [[{}]]\n", ev.time_label(), ev.id.name());
+                if !content.contains(&ev.title) {
+                    let bullet = ev.to_markdown_bullet();
                     if !content.ends_with('\n') && !content.is_empty() {
                         content.push('\n');
                     }
@@ -867,6 +896,7 @@ mod tests {
     fn test_create_event_integrates_into_daily_note() {
         let (_tmp, mut state) = temp_app_state();
         let event_date = NaiveDate::from_ymd_opt(2026, 10, 25).unwrap();
+        state.active_note = None;
         state.new_event_draft = EventDraft {
             title: "Client Meeting".into(),
             date: event_date,
@@ -877,15 +907,52 @@ mod tests {
         };
         state.create_event();
 
-        // 1. Event note created and active in editor
-        assert!(state.active_note.is_some());
+        // 1. Target daily note is open in editor
+        let daily_id = state.daily_config.id_for(event_date);
+        assert_eq!(state.active_note.as_ref(), Some(&daily_id));
         assert_eq!(state.sidebar_section, SidebarSection::Notes);
 
-        // 2. Daily note created and has event bullet integrated
-        let daily_id = state.daily_config.id_for(event_date);
+        // 2. Daily note created and has event object embedded
         let daily_note = state.vault.get(&daily_id).expect("daily note should be auto-created");
         assert!(daily_note.content.contains("Client Meeting"));
-        assert!(daily_note.content.contains("14:00 – 15:00"));
+        assert!(daily_note.content.contains("14:00 - 15:00"));
+
+        // 3. Event is discoverable by event_store across all notes
+        let events = state.event_store.on(&state.vault, event_date);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].title, "Client Meeting");
+        assert_eq!(events[0].location.as_deref(), Some("Room 101"));
+    }
+
+    #[test]
+    fn test_create_event_embeds_into_active_note() {
+        let (_tmp, mut state) = temp_app_state();
+        let project_id = NoteId::new("Projects/Alpha").unwrap();
+        state.vault.create(project_id.clone(), "# Project Alpha\n\nMeeting notes:\n").unwrap();
+        state.open_note(project_id.clone());
+
+        let event_date = NaiveDate::from_ymd_opt(2026, 11, 2).unwrap();
+        state.new_event_draft = EventDraft {
+            title: "Sprint Review".into(),
+            date: event_date,
+            start: chrono::NaiveTime::from_hms_opt(10, 0, 0),
+            end: chrono::NaiveTime::from_hms_opt(11, 0, 0),
+            location: "Room B".into(),
+            description: "Review sprint deliverables.".into(),
+        };
+        state.create_event();
+
+        // Embedded in active note
+        assert_eq!(state.active_note.as_ref(), Some(&project_id));
+        let note = state.vault.get(&project_id).unwrap();
+        assert!(note.content.contains("Sprint Review"));
+        assert!(note.content.contains("```event"));
+
+        // Assembled in event_store
+        let events = state.event_store.on(&state.vault, event_date);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].title, "Sprint Review");
+        assert_eq!(events[0].id, project_id);
     }
 
     #[test]
@@ -900,7 +967,10 @@ mod tests {
             location: "".into(),
             description: "".into(),
         };
-        let _ = state.event_store.create(&mut state.vault, &draft);
+        // Add event to a project note
+        let project_id = NoteId::new("Projects/Personal").unwrap();
+        state.vault.create(project_id.clone(), "# Personal\n").unwrap();
+        state.event_store.append_to_note(&mut state.vault, &project_id, &draft).unwrap();
 
         // Sync to daily note
         state.sync_events_to_daily_note(event_date);

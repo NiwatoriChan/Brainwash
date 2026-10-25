@@ -45,6 +45,7 @@ pub enum Inline<'a> {
     Url(&'a str),
     Tag(&'a str),
     Link(WikiLink),
+    Image { alt: &'a str, url: &'a str },
 }
 
 /// Parses the body of a note (front-matter is skipped, but line numbers are
@@ -178,7 +179,21 @@ fn parse_inline_plain<'a>(text: &'a str, out: &mut Vec<Inline<'a>>) {
         let rest = &text[i..];
         let at_word_start = i == 0 || bytes[i - 1].is_ascii_whitespace();
 
-        let span: Option<(Inline<'a>, usize)> = if let Some(r) = rest.strip_prefix('`') {
+        let span: Option<(Inline<'a>, usize)> = if let Some(r) = rest.strip_prefix("![") {
+            if let Some(close_bracket) = r.find("](") {
+                let alt = &r[..close_bracket];
+                let after = &r[close_bracket + 2..];
+                if let Some(close_paren) = after.find(')') {
+                    let url = &after[..close_paren];
+                    let len = 2 + close_bracket + 2 + close_paren + 1;
+                    Some((Inline::Image { alt, url }, len))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else if let Some(r) = rest.strip_prefix('`') {
             r.find('`').map(|end| (Inline::Code(&r[..end]), end + 2))
         } else if let Some(r) = rest.strip_prefix("**").or_else(|| rest.strip_prefix("__")) {
             let delim = &rest[..2];
@@ -301,6 +316,7 @@ mod tests {
                 Inline::Url(t) => format!("U({t})"),
                 Inline::Tag(t) => format!("#({t})"),
                 Inline::Link(l) => format!("L({})", l.target),
+                Inline::Image { alt, url } => format!("IMG({alt}, {url})"),
             })
             .collect();
         assert_eq!(
@@ -324,4 +340,18 @@ mod tests {
         assert_eq!(toggle_task(src, 1).unwrap(), "- [ ] a\n- [ ] b\nplain");
         assert_eq!(toggle_task(src, 2), None);
     }
+
+    #[test]
+    fn image_parsing() {
+        let spans = parse_inline("Here is ![A Cat](cat.png) inline");
+        assert_eq!(
+            spans,
+            vec![
+                Inline::Text("Here is "),
+                Inline::Image { alt: "A Cat", url: "cat.png" },
+                Inline::Text(" inline"),
+            ]
+        );
+    }
 }
+
