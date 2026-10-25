@@ -35,12 +35,6 @@ pub enum SidebarSection {
     Quick,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum DailyViewMode {
-    MonthGrid,
-    Agenda,
-    Timeline,
-}
 
 /// Payload stored in egui drag-and-drop when dragging a note or canvas from the sidebar.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -132,7 +126,6 @@ pub struct AppState {
 
     // Daily notes navigation date & Calendar view
     pub selected_daily_date: NaiveDate,
-    pub daily_view_mode: DailyViewMode,
     pub calendar_view_date: NaiveDate,
 
     // Theme
@@ -245,7 +238,6 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
             show_new_event_dialog: false,
             new_event_draft: EventDraft::new(today),
             selected_daily_date: today,
-            daily_view_mode: DailyViewMode::MonthGrid,
             calendar_view_date: today,
             theme_kind,
             status: Some(("Welcome to Brainwash".to_string(), Instant::now())),
@@ -432,29 +424,34 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
 
     pub fn open_daily_today(&mut self) {
         let today = Local::now().date_naive();
-        self.selected_daily_date = today;
-        match self.daily_config.open_or_create(&mut self.vault, today) {
-            Ok(id) => {
-                self.link_index = LinkIndex::build(&self.vault);
-                self.open_note(id);
-                self.top_mode = TopBarMode::Notes;
-                self.set_status(format!("Opened daily note for {}", today));
-            }
-            Err(e) => self.set_status(format!("Failed to open daily note: {e}")),
-        }
+        self.open_daily_date(today);
     }
 
     pub fn open_daily_date(&mut self, date: NaiveDate) {
         self.selected_daily_date = date;
-        match self.daily_config.open_or_create(&mut self.vault, date) {
-            Ok(id) => {
-                self.link_index = LinkIndex::build(&self.vault);
-                self.open_note(id);
-                self.top_mode = TopBarMode::Notes;
-                self.set_status(format!("Opened daily note for {}", date));
+        let id = self.daily_config.id_for(date);
+        if !self.vault.contains(&id) {
+            let day_events = self.event_store.on(&self.vault, date);
+            let events_text = if day_events.is_empty() {
+                None
+            } else {
+                let mut buf = String::new();
+                for ev in &day_events {
+                    buf.push_str(&format!("- [ ] **{}** [[{}]]\n", ev.time_label(), ev.id.name()));
+                }
+                Some(buf)
+            };
+            let content = self.daily_config.render_template_with_events(date, events_text.as_deref());
+            if let Err(e) = self.vault.create(id.clone(), &content) {
+                self.set_status(format!("Failed to create daily note: {e}"));
+                return;
             }
-            Err(e) => self.set_status(format!("Failed to open daily note: {e}")),
         }
+
+        self.link_index = LinkIndex::build(&self.vault);
+        self.open_note(id);
+        self.top_mode = TopBarMode::Notes;
+        self.set_status(format!("Opened daily note for {}", date));
     }
 
     pub fn shift_daily_date(&mut self, days: i64) {
@@ -913,4 +910,25 @@ mod tests {
         assert!(daily_note.content.contains("Dentist"));
         assert!(daily_note.content.contains("09:30"));
     }
+
+    #[test]
+    fn test_open_daily_date_creates_if_not_exists() {
+        let (_tmp, mut state) = temp_app_state();
+        let target_date = NaiveDate::from_ymd_opt(2026, 11, 15).unwrap();
+        let daily_id = state.daily_config.id_for(target_date);
+
+        // Daily note does not exist yet
+        assert!(state.vault.get(&daily_id).is_none());
+
+        // Calling open_daily_date (as triggered when clicking any date on the calendar)
+        state.open_daily_date(target_date);
+
+        // Verify it was created and is active in editor
+        assert!(state.vault.get(&daily_id).is_some());
+        assert_eq!(state.active_note.as_ref(), Some(&daily_id));
+        assert_eq!(state.top_mode, TopBarMode::Notes);
+        assert_eq!(state.sidebar_section, SidebarSection::Notes);
+        assert!(state.editor_buffer.contains("November 15, 2026"));
+    }
 }
+

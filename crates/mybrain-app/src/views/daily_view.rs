@@ -10,7 +10,7 @@ use egui::{
 use mybrain_core::events::{Event, EventDraft};
 use mybrain_core::NoteId;
 
-use crate::state::{AppState, DailyViewMode};
+use crate::state::AppState;
 use crate::theme::{self, Tokens};
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
@@ -29,27 +29,37 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             ui.vertical_centered(|ui| {
                 ui.set_max_width(theme::READABLE_WIDTH + 100.0);
 
-                // Top View Switcher & Action Bar
+                // Top Action Bar
                 ui.horizontal(|ui| {
-                    if let Some(mode) = theme::segmented(
-                        ui,
-                        &t,
-                        state.daily_view_mode,
-                        &[
-                            (DailyViewMode::MonthGrid, "Month Calendar"),
-                            (DailyViewMode::Agenda, "Events Agenda"),
-                            (DailyViewMode::Timeline, "Timeline List"),
-                        ],
-                    ) {
-                        state.daily_view_mode = mode;
-                    }
+                    ui.vertical(|ui| {
+                        ui.heading(RichText::new("Calendar").strong().size(18.0).color(t.text));
+                        ui.label(RichText::new("Click any date to open or create its daily note").color(t.text_dim).size(12.0));
+                    });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    RichText::new("Open Today's Note →")
+                                        .strong()
+                                        .color(Color32::WHITE),
+                                )
+                                .fill(t.accent)
+                                .stroke(Stroke::NONE)
+                                .corner_radius(CornerRadius::same(t.radius_sm as u8)),
+                            )
+                            .on_hover_text("Open or create today's daily note")
+                            .clicked()
+                        {
+                            date_to_open = Some(Local::now().date_naive());
+                        }
+
                         if theme::ghost_button(
                             ui,
                             &t,
-                            RichText::new("Today").color(t.accent_text).strong(),
+                            RichText::new("Jump to Today").color(t.accent_text).strong(),
                         )
+                        .on_hover_text("View current month in calendar")
                         .clicked()
                         {
                             let today = Local::now().date_naive();
@@ -69,47 +79,21 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                                 EventDraft::new(state.selected_daily_date);
                             state.show_new_event_dialog = true;
                         }
-
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    RichText::new("Open Daily Note")
-                                        .strong()
-                                        .color(Color32::WHITE),
-                                )
-                                .fill(t.accent)
-                                .stroke(Stroke::NONE)
-                                .corner_radius(CornerRadius::same(t.radius_sm as u8)),
-                            )
-                            .clicked()
-                        {
-                            date_to_open = Some(state.selected_daily_date);
-                        }
                     });
                 });
 
                 ui.add_space(14.0);
 
-                match state.daily_view_mode {
-                    DailyViewMode::MonthGrid => {
-                        render_month_calendar(
-                            ui,
-                            state,
-                            &t,
-                            &mut selected_date_to_set,
-                            &mut date_to_open,
-                            &mut event_to_open,
-                            &mut open_event_dialog,
-                            &mut sync_events_date,
-                        );
-                    }
-                    DailyViewMode::Agenda => {
-                        crate::views::events_view::show(ui, state);
-                    }
-                    DailyViewMode::Timeline => {
-                        render_timeline_list(ui, state, &t, &mut date_to_open);
-                    }
-                }
+                render_month_calendar(
+                    ui,
+                    state,
+                    &t,
+                    &mut selected_date_to_set,
+                    &mut date_to_open,
+                    &mut event_to_open,
+                    &mut open_event_dialog,
+                    &mut sync_events_date,
+                );
             });
             ui.add_space(40.0);
         });
@@ -255,8 +239,6 @@ fn render_month_calendar(
 
                     if resp.clicked() {
                         *selected_date_to_set = Some(cell_date);
-                    }
-                    if resp.double_clicked() {
                         *date_to_open = Some(cell_date);
                     }
 
@@ -352,7 +334,12 @@ fn render_month_calendar(
                         }
                     }
 
-                    resp.on_hover_cursor(CursorIcon::PointingHand);
+                    let hint = if has_daily {
+                        format!("Open daily note for {}", cell_date.format("%A, %B %-d"))
+                    } else {
+                        format!("Create and open daily note for {}", cell_date.format("%A, %B %-d"))
+                    };
+                    resp.on_hover_cursor(CursorIcon::PointingHand).on_hover_text(hint);
                 }
             }
         });
@@ -510,92 +497,3 @@ fn render_selected_day_panel(
     });
 }
 
-/// Render the previous timeline list of existing daily notes.
-fn render_timeline_list(
-    ui: &mut Ui,
-    state: &AppState,
-    t: &Tokens,
-    date_to_open: &mut Option<NaiveDate>,
-) {
-    // Date Navigator Banner
-    let card = theme::card_frame(t, false).inner_margin(Margin::symmetric(18, 14));
-
-    card.show(ui, |ui| {
-        ui.horizontal(|ui| {
-            let date_str = state.selected_daily_date.format("%A, %B %-d, %Y").to_string();
-            ui.label(RichText::new(date_str).strong().size(15.0).color(t.accent_text));
-
-            if state.selected_daily_date == Local::now().date_naive() {
-                ui.add_space(4.0);
-                theme::pill(ui, "Today", t.accent_text, t.accent_soft);
-            }
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .add(
-                        egui::Button::new(
-                            RichText::new("Open Note").strong().color(Color32::WHITE),
-                        )
-                        .fill(t.accent)
-                        .stroke(Stroke::NONE)
-                        .corner_radius(CornerRadius::same(t.radius_sm as u8)),
-                    )
-                    .clicked()
-                {
-                    *date_to_open = Some(state.selected_daily_date);
-                }
-            });
-        });
-    });
-
-    ui.add_space(20.0);
-    ui.horizontal(|ui| {
-        theme::section_label(ui, t, "Recent Daily Notes Timeline");
-    });
-    ui.add_space(6.0);
-
-    let existing = state.daily_config.existing_dates(&state.vault);
-    if existing.is_empty() {
-        Frame::NONE
-            .fill(t.card)
-            .stroke(Stroke::new(1.0, t.card_border))
-            .corner_radius(CornerRadius::same(t.radius as u8))
-            .inner_margin(Margin::same(24))
-            .show(ui, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.label(RichText::new("No daily notes created yet.").color(t.text_dim).size(14.0));
-                    ui.add_space(6.0);
-                    ui.label(RichText::new("Use the calendar above or press Today to begin!").color(t.text_faint).size(12.0));
-                });
-            });
-    } else {
-        let mut dates: Vec<_> = existing.into_iter().collect();
-        dates.sort_by(|a, b| b.cmp(a));
-
-        for date in dates {
-            let id = state.daily_config.id_for(date);
-            let is_today = date == Local::now().date_naive();
-            let is_active = state.active_note.as_ref() == Some(&id);
-
-            let row_card = theme::card_frame(t, is_active).inner_margin(Margin::symmetric(14, 10));
-
-            row_card.show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(date.format("%Y-%m-%d").to_string()).strong().size(13.5).color(t.text));
-                    ui.label(RichText::new(date.format("%A").to_string()).color(t.text_dim).size(12.5));
-
-                    if is_today {
-                        theme::pill(ui, "Today", t.accent_text, t.accent_soft);
-                    }
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if theme::ghost_button(ui, t, RichText::new("Open →").color(t.accent_text)).clicked() {
-                            *date_to_open = Some(date);
-                        }
-                    });
-                });
-            });
-            ui.add_space(6.0);
-        }
-    }
-}

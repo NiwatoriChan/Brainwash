@@ -377,8 +377,11 @@ impl eframe::App for BrainwashApp {
                             SidebarSection::Notes => {
                                 views::editor::show(ui, &mut self.state);
                             }
-                            SidebarSection::Daily | SidebarSection::Events => {
+                            SidebarSection::Daily => {
                                 views::daily_view::show(ui, &mut self.state);
+                            }
+                            SidebarSection::Events => {
+                                views::events_view::show(ui, &mut self.state);
                             }
                             SidebarSection::Quick => {
                                 views::quick_capture::show_keep_view(ui, &mut self.state);
