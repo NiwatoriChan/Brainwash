@@ -709,6 +709,7 @@ pub fn paint_graph_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
 }
 
 /// Paint a clean vector canvas icon.
+#[allow(dead_code)]
 pub fn paint_canvas_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
     let center = rect.center();
     let box_rect = Rect::from_center_size(center, vec2(14.0, 12.0));
