@@ -1,25 +1,43 @@
 //! Application state and actions for MyBrain.
 
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use chrono::{Days, Local, NaiveDate};
+use chrono::{Datelike, Days, Local, NaiveDate};
 use mybrain_core::{
-    DailyNotes, EventDraft, EventStore, LinkIndex, NoteId, QuickNotes, Vault,
+    AppSettings, CanvasFile, DailyNotes, EventDraft, EventStore, LinkIndex, NoteId, QuickNotes,
+    Vault,
 };
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// How long a transient status message stays visible.
+pub const STATUS_TTL: Duration = Duration::from_secs(4);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ViewMode {
     EditOnly,
     Split,
     PreviewOnly,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MainTab {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TopBarMode {
+    Notes,
+    Graph,
+    Canvas,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SidebarSection {
     Notes,
     Daily,
     Events,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DailyViewMode {
+    MonthGrid,
+    Timeline,
 }
 
 pub struct AppState {
@@ -40,13 +58,44 @@ pub struct AppState {
     pub history_idx: usize,
 
     // Tabs & Panels
-    pub main_tab: MainTab,
-    pub search_query: String,
+    pub top_mode: TopBarMode,
+    pub sidebar_section: SidebarSection,
+    pub show_sidebar: bool,
     pub show_backlinks: bool,
+    pub search_query: String,
+
+    // Graph state
+    pub graph: crate::views::graph_view::GraphState,
+
+    // Canvas State & Document
+    pub active_canvas_path: Option<String>,
+    pub canvas_doc: Option<mybrain_core::CanvasFile>,
+    pub canvas_dirty: bool,
+    pub canvas_state: crate::views::canvas_view::CanvasState,
+
+    // Settings
+    pub settings: mybrain_core::AppSettings,
+    pub settings_path: PathBuf,
+    pub show_settings_dialog: bool,
+
+    // Vault Switcher
+    pub show_vault_dialog: bool,
+    pub vault_path_input: String,
+
+    // In-Folder Creation
+    pub new_note_folder: Option<String>,
+    pub new_event_folder: Option<String>,
+    pub show_new_folder_dialog: bool,
+    pub new_folder_parent: Option<String>,
+    pub new_folder_name: String,
+    pub show_new_canvas_dialog: bool,
+    pub new_canvas_folder: Option<String>,
+    pub new_canvas_name: String,
 
     // Modals / Overlays
     pub show_command_palette: bool,
     pub command_palette_query: String,
+    pub command_palette_selected: usize,
 
     pub show_quick_capture: bool,
     pub quick_capture_buffer: String,
@@ -57,8 +106,10 @@ pub struct AppState {
     pub show_new_event_dialog: bool,
     pub new_event_draft: EventDraft,
 
-    // Daily notes navigation date
+    // Daily notes navigation date & Calendar view
     pub selected_daily_date: NaiveDate,
+    pub daily_view_mode: DailyViewMode,
+    pub calendar_view_date: NaiveDate,
 
     // Theme
     pub theme_kind: crate::theme::ThemeKind,
@@ -100,6 +151,21 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
         }
 
         let link_index = LinkIndex::build(&vault);
+        let settings_path = dirs::config_dir()
+            .map(|p| p.join("brainwash").join("settings.json"))
+            .unwrap_or_else(|| vault_path.join(".brainwash_settings.json"));
+        let mut settings = AppSettings::load_from_file(&settings_path);
+        settings.record_recent_vault(&vault_path.to_string_lossy());
+        let _ = settings.save_to_file(&settings_path);
+
+        let theme_kind = match settings.theme.as_str() {
+            "StudioLight" => crate::theme::ThemeKind::StudioLight,
+            "Pro" => crate::theme::ThemeKind::Pro,
+            "SolarizedDark" => crate::theme::ThemeKind::SolarizedDark,
+            "AdwaitaDark" => crate::theme::ThemeKind::AdwaitaDark,
+            _ => crate::theme::ThemeKind::Studio,
+        };
+
         let mut state = Self {
             vault,
             link_index,
@@ -112,11 +178,32 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
             view_mode: ViewMode::Split,
             history: Vec::new(),
             history_idx: 0,
-            main_tab: MainTab::Notes,
+            top_mode: TopBarMode::Notes,
+            sidebar_section: SidebarSection::Notes,
+            show_sidebar: true,
+            show_backlinks: false,
             search_query: String::new(),
-            show_backlinks: true,
+            graph: crate::views::graph_view::GraphState::default(),
+            active_canvas_path: None,
+            canvas_doc: None,
+            canvas_dirty: false,
+            canvas_state: crate::views::canvas_view::CanvasState::default(),
+            settings,
+            settings_path,
+            show_settings_dialog: false,
+            show_vault_dialog: false,
+            vault_path_input: String::new(),
+            new_note_folder: None,
+            new_event_folder: None,
+            show_new_folder_dialog: false,
+            new_folder_parent: None,
+            new_folder_name: String::new(),
+            show_new_canvas_dialog: false,
+            new_canvas_folder: None,
+            new_canvas_name: String::new(),
             show_command_palette: false,
             command_palette_query: String::new(),
+            command_palette_selected: 0,
             show_quick_capture: false,
             quick_capture_buffer: String::new(),
             show_new_note_dialog: false,
@@ -124,7 +211,9 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
             show_new_event_dialog: false,
             new_event_draft: EventDraft::new(today),
             selected_daily_date: today,
-            theme_kind: crate::theme::ThemeKind::Studio,
+            daily_view_mode: DailyViewMode::MonthGrid,
+            calendar_view_date: today,
+            theme_kind,
             status: Some(("Welcome to Brainwash".to_string(), Instant::now())),
         };
 
@@ -138,6 +227,14 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
 
     pub fn set_status(&mut self, msg: impl Into<String>) {
         self.status = Some((msg.into(), Instant::now()));
+    }
+
+    /// The current status message, if it hasn't expired yet.
+    pub fn active_status(&self) -> Option<&str> {
+        self.status
+            .as_ref()
+            .filter(|(_, at)| at.elapsed() < STATUS_TTL)
+            .map(|(msg, _)| msg.as_str())
     }
 
     pub fn save_current(&mut self) {
@@ -172,7 +269,8 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
             }
             self.history.push(id);
             self.history_idx = self.history.len() - 1;
-            self.main_tab = MainTab::Notes;
+            self.top_mode = TopBarMode::Notes;
+            self.sidebar_section = SidebarSection::Notes;
         }
     }
 
@@ -278,7 +376,8 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
             Ok(id) => {
                 self.link_index = LinkIndex::build(&self.vault);
                 self.open_note(id);
-                self.main_tab = MainTab::Daily;
+                self.top_mode = TopBarMode::Notes;
+                self.sidebar_section = SidebarSection::Daily;
                 self.set_status(format!("Opened daily note for {}", today));
             }
             Err(e) => self.set_status(format!("Failed to open daily note: {e}")),
@@ -291,7 +390,8 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
             Ok(id) => {
                 self.link_index = LinkIndex::build(&self.vault);
                 self.open_note(id);
-                self.main_tab = MainTab::Daily;
+                self.top_mode = TopBarMode::Notes;
+                self.sidebar_section = SidebarSection::Daily;
             }
             Err(e) => self.set_status(format!("Failed to open daily note: {e}")),
         }
@@ -333,9 +433,103 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
                 self.show_new_event_dialog = false;
                 self.set_status("Event created!");
                 self.open_note(id);
-                self.main_tab = MainTab::Events;
+                self.top_mode = TopBarMode::Notes;
+                self.sidebar_section = SidebarSection::Events;
             }
             Err(e) => self.set_status(format!("Invalid event: {e}")),
+        }
+    }
+
+    pub fn save_settings(&self) {
+        let _ = self.settings.save_to_file(&self.settings_path);
+    }
+
+    pub fn switch_vault(&mut self, new_root: PathBuf) -> Result<(), mybrain_core::Error> {
+        let mut new_vault = Vault::open(&new_root)?;
+        if new_vault.is_empty() {
+            let welcome_id = NoteId::new("Welcome to Brainwash")?;
+            let _ = new_vault.create(welcome_id.clone(), "# Welcome to Brainwash\nYour fresh new vault.");
+        }
+        self.link_index = LinkIndex::build(&new_vault);
+        self.vault = new_vault;
+        self.active_note = None;
+        self.editor_buffer.clear();
+        self.editor_dirty = false;
+        self.history.clear();
+        self.history_idx = 0;
+        self.active_canvas_path = None;
+        self.canvas_doc = None;
+        self.canvas_dirty = false;
+        self.settings.record_recent_vault(&self.vault.root().to_string_lossy());
+        self.save_settings();
+
+        let first = self.vault.notes().next().map(|n| n.id.clone());
+        if let Some(id) = first {
+            self.open_note(id);
+        }
+        self.set_status(format!("Opened vault: {}", self.vault.root().display()));
+        Ok(())
+    }
+
+    pub fn open_canvas(&mut self, rel_path: &str) {
+        match self.vault.load_canvas(rel_path) {
+            Ok(doc) => {
+                self.active_canvas_path = Some(rel_path.to_owned());
+                self.canvas_doc = Some(doc);
+                self.canvas_dirty = false;
+                self.top_mode = TopBarMode::Canvas;
+                self.set_status(format!("Opened canvas: {rel_path}"));
+            }
+            Err(e) => self.set_status(format!("Failed to open canvas: {e}")),
+        }
+    }
+
+    pub fn save_canvas(&mut self) {
+        if let (Some(path), Some(doc)) = (&self.active_canvas_path, &self.canvas_doc) {
+            if let Err(e) = self.vault.save_canvas(path, doc) {
+                self.set_status(format!("Failed to save canvas: {e}"));
+            } else {
+                self.canvas_dirty = false;
+            }
+        }
+    }
+
+    pub fn create_canvas(&mut self, folder: Option<&str>, name: &str) -> Result<String, mybrain_core::Error> {
+        let clean_name = name.trim().trim_end_matches(".canvas");
+        let safe_name = if clean_name.is_empty() { "Untitled" } else { clean_name };
+        let rel_path = match folder {
+            Some(f) if !f.is_empty() => format!("{f}/{safe_name}.canvas"),
+            _ => format!("{safe_name}.canvas"),
+        };
+        let mut doc = CanvasFile::new();
+        doc.add_text_node("New Idea\nType Markdown or [[Links]] here…", 0.0, 0.0, 220.0, 140.0);
+        self.vault.save_canvas(&rel_path, &doc)?;
+        self.open_canvas(&rel_path);
+        Ok(rel_path)
+    }
+
+    pub fn create_folder(&mut self, parent: Option<&str>, name: &str) -> Result<(), mybrain_core::Error> {
+        let clean = name.trim();
+        if clean.is_empty() {
+            return Err(mybrain_core::Error::InvalidName("Folder name cannot be empty".into()));
+        }
+        let rel = match parent {
+            Some(p) if !p.is_empty() => format!("{p}/{clean}"),
+            _ => clean.to_owned(),
+        };
+        self.vault.create_folder(&rel)?;
+        self.set_status(format!("Created folder: {rel}"));
+        Ok(())
+    }
+
+    pub fn shift_calendar_month(&mut self, delta: i32) {
+        let year = self.calendar_view_date.year();
+        let month = self.calendar_view_date.month() as i32;
+        let total_months = year * 12 + (month - 1) + delta;
+        let new_year = total_months.div_euclid(12);
+        let new_month = (total_months.rem_euclid(12) + 1) as u32;
+        if let Some(d) = NaiveDate::from_ymd_opt(new_year, new_month, 1) {
+            self.calendar_view_date = d;
         }
     }
 }

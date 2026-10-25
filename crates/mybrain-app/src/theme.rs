@@ -8,7 +8,11 @@
 //! - **Adwaita Dark**: GNOME libadwaita palette with blue accents.
 
 use std::sync::Arc;
-use egui::{Color32, CornerRadius, FontData, FontDefinitions, FontFamily, Stroke, Visuals};
+use egui::text::{LayoutJob, TextWrapping};
+use egui::{
+    pos2, vec2, Color32, CornerRadius, CursorIcon, FontData, FontDefinitions, FontFamily, FontId,
+    Frame, Margin, Rect, Response, RichText, Sense, Stroke, TextFormat, Ui, Visuals,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -252,64 +256,382 @@ impl Tokens {
     }
 }
 
-// Global convenience color constants matching PhotoCraft Studio theme
-#[allow(dead_code)]
-pub const BG_CANVAS: Color32 = Color32::from_rgb(14, 14, 15);
-#[allow(dead_code)]
-pub const BG_PANEL: Color32 = Color32::from_rgb(20, 20, 21);
-#[allow(dead_code)]
-pub const BG_CARD: Color32 = Color32::from_rgb(26, 26, 28);
-#[allow(dead_code)]
-pub const BG_HOVER: Color32 = Color32::from_rgb(44, 44, 48);
-#[allow(dead_code)]
-pub const BG_ACTIVE: Color32 = Color32::from_rgb(56, 56, 62);
+// ---------------------------------------------------------------------------
+// Shared themed widgets
+// ---------------------------------------------------------------------------
 
-#[allow(dead_code)]
-pub const TEXT_PRIMARY: Color32 = Color32::from_rgb(236, 236, 240);
-#[allow(dead_code)]
-pub const TEXT_MUTED: Color32 = Color32::from_rgb(150, 150, 158);
-#[allow(dead_code)]
-pub const TEXT_FAINT: Color32 = Color32::from_rgb(96, 96, 104);
+/// Maximum width of rendered prose / editor text for comfortable reading.
+pub const READABLE_WIDTH: f32 = 760.0;
 
-#[allow(dead_code)]
-pub const ACCENT_PURPLE: Color32 = Color32::from_rgb(139, 124, 246);
-#[allow(dead_code)]
-pub const ACCENT_PURPLE_LIGHT: Color32 = Color32::from_rgb(214, 208, 255);
-#[allow(dead_code)]
-pub const ACCENT_CYAN: Color32 = Color32::from_rgb(85, 205, 195);
-#[allow(dead_code)]
-pub const ACCENT_AMBER: Color32 = Color32::from_rgb(240, 190, 90);
-#[allow(dead_code)]
-pub const ACCENT_GREEN: Color32 = Color32::from_rgb(105, 210, 135);
-#[allow(dead_code)]
-pub const ACCENT_RED: Color32 = Color32::from_rgb(240, 96, 96);
+/// Kind of note, derived from its folder, used for coloured dots in lists.
+pub fn note_kind_color(id: &str, t: &Tokens) -> Color32 {
+    if id.starts_with("Daily/") {
+        t.accent
+    } else if id.starts_with("Events/") {
+        t.warning
+    } else if id.starts_with("Quick Notes/") {
+        t.success
+    } else {
+        t.text_faint
+    }
+}
 
-pub const BORDER_COLOR: Color32 = Color32::from_rgb(40, 40, 44);
+pub fn truncated_galley(
+    ui: &Ui,
+    text: &str,
+    font: FontId,
+    color: Color32,
+    max_width: f32,
+) -> Arc<egui::Galley> {
+    let mut job = LayoutJob::single_section(text.to_owned(), TextFormat::simple(font, color));
+    job.wrap = TextWrapping::truncate_at_width(max_width.max(0.0));
+    ui.ctx().fonts_mut(|f| f.layout_job(job))
+}
+
+/// Small uppercase section caption (e.g. "EXPLORER", "BACKLINKS").
+pub fn section_label(ui: &mut Ui, t: &Tokens, text: &str) {
+    ui.label(
+        RichText::new(text.to_uppercase())
+            .size(10.5)
+            .strong()
+            .color(t.text_faint),
+    );
+}
+
+/// Full-width, single-line clickable list row with hover / selected states.
+///
+/// * `dot`: optional coloured bullet on the left.
+/// * `trailing`: optional faint text right-aligned (e.g. folder name).
+pub fn list_row(
+    ui: &mut Ui,
+    t: &Tokens,
+    selected: bool,
+    dot: Option<Color32>,
+    title: &str,
+    trailing: Option<&str>,
+) -> Response {
+    let height = 26.0;
+    let (rect, resp) =
+        ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
+
+    if ui.is_rect_visible(rect) {
+        let radius = CornerRadius::same(t.radius_sm as u8);
+        let painter = ui.painter();
+
+        if selected {
+            painter.rect_filled(rect, radius, t.accent_soft);
+            let bar = Rect::from_min_size(
+                pos2(rect.left(), rect.top() + 5.0),
+                vec2(3.0, rect.height() - 10.0),
+            );
+            painter.rect_filled(bar, CornerRadius::same(2), t.accent);
+        } else if resp.hovered() {
+            painter.rect_filled(rect, radius, t.hover);
+        }
+
+        let mut x = rect.left() + 10.0;
+        if let Some(c) = dot {
+            painter.circle_filled(pos2(x + 3.0, rect.center().y), 3.0, c);
+            x += 14.0;
+        }
+
+        let mut right = rect.right() - 8.0;
+        if let Some(trail) = trailing {
+            let g = truncated_galley(ui, trail, FontId::proportional(10.5), t.text_faint, 90.0);
+            right -= g.size().x;
+            painter.galley(pos2(right, rect.center().y - g.size().y / 2.0), g, t.text_faint);
+            right -= 8.0;
+        }
+
+        let color = if selected { t.text } else if resp.hovered() { t.text } else { t.text_dim };
+        let g = truncated_galley(ui, title, FontId::proportional(13.0), color, right - x);
+        painter.galley(pos2(x, rect.center().y - g.size().y / 2.0), g, color);
+    }
+
+    resp.on_hover_cursor(CursorIcon::PointingHand)
+}
+
+/// Segmented control (pill group). Returns the option clicked this frame, if any.
+pub fn segmented<T: PartialEq + Copy>(
+    ui: &mut Ui,
+    t: &Tokens,
+    current: T,
+    options: &[(T, &str)],
+) -> Option<T> {
+    let mut clicked = None;
+    Frame::NONE
+        .fill(t.field)
+        .stroke(Stroke::new(1.0, t.separator))
+        .corner_radius(CornerRadius::same(t.radius as u8))
+        .inner_margin(Margin::same(2))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            ui.horizontal(|ui| {
+                for (value, label) in options {
+                    let selected = *value == current;
+                    let font = FontId::proportional(12.5);
+                    let g = truncated_galley(ui, label, font, t.text, f32::INFINITY);
+                    let size = vec2(g.size().x + 20.0, 24.0);
+                    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+                    let radius = CornerRadius::same((t.radius as u8).saturating_sub(2));
+                    let color = if selected {
+                        ui.painter().rect_filled(rect, radius, t.card);
+                        ui.painter().rect_stroke(
+                            rect,
+                            radius,
+                            Stroke::new(1.0, t.card_border),
+                            egui::StrokeKind::Inside,
+                        );
+                        t.text
+                    } else if resp.hovered() {
+                        ui.painter().rect_filled(rect, radius, t.hover);
+                        t.text
+                    } else {
+                        t.text_dim
+                    };
+                    ui.painter().galley(rect.center() - g.size() / 2.0, g, color);
+                    if resp.on_hover_cursor(CursorIcon::PointingHand).clicked() {
+                        clicked = Some(*value);
+                    }
+                }
+            });
+        });
+    clicked
+}
+
+/// Frameless button that only shows a background when hovered.
+pub fn ghost_button(ui: &mut Ui, t: &Tokens, text: impl Into<RichText>) -> Response {
+    let rt: RichText = text.into();
+    ui.add(
+        egui::Button::new(rt)
+            .fill(Color32::TRANSPARENT)
+            .stroke(Stroke::NONE)
+            .corner_radius(CornerRadius::same(t.radius_sm as u8)),
+    )
+    .on_hover_cursor(CursorIcon::PointingHand)
+}
+
+/// Filled accent call-to-action button.
+#[allow(dead_code)]
+pub fn primary_button(ui: &mut Ui, t: &Tokens, text: &str) -> Response {
+    ui.add(
+        egui::Button::new(RichText::new(text).strong().color(Color32::WHITE))
+            .fill(t.accent)
+            .stroke(Stroke::NONE)
+            .corner_radius(CornerRadius::same(t.radius_sm as u8)),
+    )
+    .on_hover_cursor(CursorIcon::PointingHand)
+}
+
+/// Rounded tag/badge pill.
+pub fn pill(ui: &mut Ui, text: &str, fg: Color32, bg: Color32) {
+    Frame::NONE
+        .fill(bg)
+        .corner_radius(CornerRadius::same(10))
+        .inner_margin(Margin::symmetric(8, 2))
+        .show(ui, |ui| {
+            ui.label(RichText::new(text).color(fg).size(11.0));
+        });
+}
+
+/// Standard card frame used for list items and panels.
+pub fn card_frame(t: &Tokens, highlighted: bool) -> Frame {
+    Frame::NONE
+        .fill(t.card)
+        .stroke(Stroke::new(
+            1.0,
+            if highlighted { t.accent_border } else { t.card_border },
+        ))
+        .corner_radius(CornerRadius::same(t.radius as u8))
+        .inner_margin(Margin::symmetric(12, 10))
+}
+
+/// Frame used for modal dialogs.
+pub fn modal_frame(t: &Tokens) -> Frame {
+    Frame::NONE
+        .fill(t.card)
+        .stroke(Stroke::new(1.0, t.card_border))
+        .corner_radius(CornerRadius::same(t.radius_lg as u8))
+        .inner_margin(Margin::same(18))
+        .shadow(egui::Shadow {
+            offset: [0, 12],
+            blur: 32,
+            spread: 0,
+            color: t.shadow,
+        })
+}
+
+/// Paint a hairline along the bottom edge of the last allocated rect.
+pub fn bottom_hairline(ui: &Ui, rect: Rect, t: &Tokens) {
+    ui.painter()
+        .hline(rect.x_range(), rect.bottom(), Stroke::new(1.0, t.separator));
+}
+
+/// Paint a crisp vector sidebar icon showing split pane layout.
+pub fn paint_sidebar_icon(
+    painter: &egui::Painter,
+    rect: Rect,
+    stroke_color: Color32,
+    fill_color: Color32,
+    is_open: bool,
+) {
+    let box_rect = Rect::from_center_size(rect.center(), vec2(15.0, 13.0));
+    let divider_x = box_rect.left() + 5.0;
+
+    // Background fill for active sidebar pane
+    if is_open {
+        let left_pane = Rect::from_min_max(
+            pos2(box_rect.left() + 1.0, box_rect.top() + 1.0),
+            pos2(divider_x, box_rect.bottom() - 1.0),
+        );
+        painter.rect_filled(left_pane, CornerRadius::same(1), fill_color);
+    }
+
+    // Outer box stroke
+    painter.rect_stroke(
+        box_rect,
+        CornerRadius::same(2),
+        Stroke::new(1.2, stroke_color),
+        egui::StrokeKind::Inside,
+    );
+
+    // Vertical dividing line
+    painter.line_segment(
+        [
+            pos2(divider_x, box_rect.top() + 1.0),
+            pos2(divider_x, box_rect.bottom() - 1.0),
+        ],
+        Stroke::new(1.2, stroke_color),
+    );
+}
+
+/// Dedicated clickable vector sidebar toggle button.
+pub fn icon_sidebar_button(ui: &mut Ui, t: &Tokens, is_open: bool) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::click());
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        if resp.is_pointer_button_down_on() {
+            painter.rect_filled(rect, CornerRadius::same(t.radius_sm as u8), t.pressed);
+        } else if resp.hovered() {
+            painter.rect_filled(rect, CornerRadius::same(t.radius_sm as u8), t.hover);
+        }
+
+        let stroke_color = if resp.hovered() {
+            t.text
+        } else if is_open {
+            t.accent_text
+        } else {
+            t.text_dim
+        };
+
+        let fill_color = if is_open {
+            t.accent
+        } else {
+            Color32::TRANSPARENT
+        };
+
+        paint_sidebar_icon(painter, rect, stroke_color, fill_color, is_open);
+    }
+    resp.on_hover_cursor(CursorIcon::PointingHand)
+}
+
+/// Paint a clean vector search magnifying glass.
+pub fn paint_search_icon(painter: &egui::Painter, center: egui::Pos2, size: f32, color: Color32) {
+    let radius = size * 0.32;
+    let circle_center = center - vec2(size * 0.12, size * 0.12);
+    painter.circle_stroke(circle_center, radius, Stroke::new(1.3, color));
+
+    let dir = vec2(0.7071, 0.7071);
+    let start = circle_center + dir * radius;
+    let end = circle_center + dir * (radius + size * 0.36);
+    painter.line_segment([start, end], Stroke::new(1.5, color));
+}
+
+/// Vector search icon widget.
+pub fn icon_search(ui: &mut Ui, size: f32, color: Color32) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
+    if ui.is_rect_visible(rect) {
+        paint_search_icon(ui.painter(), rect.center(), size, color);
+    }
+    resp
+}
+
+/// Dedicated clickable vector close button ('×') that never produces tofu.
+pub fn icon_close_button(ui: &mut Ui, t: &Tokens) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        if resp.hovered() {
+            painter.rect_filled(rect, CornerRadius::same(t.radius_sm as u8), t.hover);
+        }
+
+        let color = if resp.hovered() { t.text } else { t.text_faint };
+        let c = rect.center();
+        let half = 3.8;
+        painter.line_segment(
+            [c - vec2(half, half), c + vec2(half, half)],
+            Stroke::new(1.4, color),
+        );
+        painter.line_segment(
+            [c + vec2(-half, half), c + vec2(half, -half)],
+            Stroke::new(1.4, color),
+        );
+    }
+    resp.on_hover_cursor(CursorIcon::PointingHand)
+}
+
+/// Paint a clean vector location pin.
+pub fn icon_pin(ui: &mut Ui, size: f32, color: Color32) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        let center_x = rect.center().x;
+        let head_y = rect.top() + size * 0.36;
+        let radius = size * 0.30;
+        let head_center = pos2(center_x, head_y);
+
+        painter.circle_stroke(head_center, radius, Stroke::new(1.3, color));
+        painter.circle_filled(head_center, size * 0.10, color);
+
+        let bottom_tip = pos2(center_x, rect.bottom() - 0.5);
+        let left_edge = head_center + vec2(-radius * 0.85, radius * 0.5);
+        let right_edge = head_center + vec2(radius * 0.85, radius * 0.5);
+
+        painter.line_segment([left_edge, bottom_tip], Stroke::new(1.2, color));
+        painter.line_segment([right_edge, bottom_tip], Stroke::new(1.2, color));
+    }
+    resp
+}
 
 /// Install font fallback stack to prevent missing glyph tofu.
 pub fn install_fonts(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
 
-    // Check system fonts for extra fallback symbols/glyphs
+    // Check system fonts for extra fallback symbols/glyphs on NixOS and standard Linux
     let candidate_fonts = [
-        "/nix/store/nb12xsc3aj49hgr0jqjqp9gnd6l9lxj9-nerd-fonts-hack-3.4.0+3.003/share/fonts/truetype/NerdFonts/Hack/HackNerdFont-Regular.ttf",
-        "/nix/store/349bajb6xdfd4mw3in7bs8jkpmhx1w96-dejavu-fonts-2.37/share/fonts/truetype/DejaVuSans.ttf",
+        "/run/current-system/sw/share/X11/fonts/DejaVuSans.ttf",
+        "/run/current-system/sw/share/X11/fonts/NotoSansSymbols.ttf",
+        "/run/current-system/sw/share/X11/fonts/NotoSansSymbols2-Regular.otf",
+        "/run/current-system/sw/share/X11/fonts/unifont.otf",
+        "/run/current-system/sw/share/X11/fonts/NotoSans.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/noto/NotoSans-Regular.ttf",
     ];
 
-    for path in candidate_fonts {
+    for (idx, path) in candidate_fonts.iter().enumerate() {
         if let Ok(bytes) = std::fs::read(path) {
+            let name = format!("system_fallback_{idx}");
             fonts.font_data.insert(
-                "system_symbol_fallback".to_owned(),
+                name.clone(),
                 Arc::new(FontData::from_owned(bytes)),
             );
             if let Some(prop) = fonts.families.get_mut(&FontFamily::Proportional) {
-                prop.push("system_symbol_fallback".to_owned());
+                prop.push(name.clone());
             }
             if let Some(mono) = fonts.families.get_mut(&FontFamily::Monospace) {
-                mono.push("system_symbol_fallback".to_owned());
+                mono.push(name);
             }
-            break;
         }
     }
 

@@ -20,6 +20,7 @@
 //! Nothing in this crate depends on a GUI, which keeps it fast to test and
 //! allows alternative front-ends (CLI, TUI, ...) to reuse it.
 
+pub mod canvas;
 pub mod daily;
 pub mod error;
 pub mod events;
@@ -29,8 +30,10 @@ pub mod links;
 pub mod markdown;
 pub mod note;
 pub mod quick;
+pub mod settings;
 pub mod vault;
 
+pub use canvas::{CanvasEdge, CanvasFile, CanvasNode};
 pub use daily::DailyNotes;
 pub use error::{Error, Result};
 pub use events::{Event, EventDraft, EventStore};
@@ -38,4 +41,5 @@ pub use index::LinkIndex;
 pub use links::WikiLink;
 pub use note::{Note, NoteId};
 pub use quick::QuickNotes;
+pub use settings::AppSettings;
 pub use vault::Vault;

@@ -1,10 +1,10 @@
 //! Command Palette / Fast Switcher modal (Ctrl+P / Ctrl+O).
 
-use egui::{CornerRadius, Frame, Margin, RichText, ScrollArea, Stroke, Window};
+use egui::{vec2, Align2, Color32, CornerRadius, Frame, Id, Margin, RichText, ScrollArea, Stroke};
 use mybrain_core::NoteId;
 
 use crate::state::AppState;
-use crate::theme::Tokens;
+use crate::theme::{self, Tokens};
 
 pub fn show(ctx: &egui::Context, state: &mut AppState) {
     if !state.show_command_palette {
@@ -12,105 +12,171 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
     }
 
     let t = Tokens::get(ctx);
-    let mut open = true;
-    let mut should_close = false;
     let mut note_to_open: Option<NoteId> = None;
     let mut note_to_create: Option<String> = None;
+    let mut close = false;
 
-    Window::new("Quick Switcher")
-        .open(&mut open)
-        .title_bar(false)
-        .resizable(false)
-        .collapsible(false)
-        .default_width(520.0)
-        .anchor(egui::Align2::CENTER_TOP, [0.0, 100.0])
+    let hits: Vec<NoteId> = if state.command_palette_query.trim().is_empty() {
+        state.vault.notes().take(15).map(|n| n.id.clone()).collect()
+    } else {
+        state
+            .vault
+            .search(&state.command_palette_query)
+            .into_iter()
+            .take(20)
+            .map(|h| h.id)
+            .collect()
+    };
+
+    let hits_len = hits.len();
+    if state.command_palette_selected >= hits_len && hits_len > 0 {
+        state.command_palette_selected = hits_len - 1;
+    }
+
+    // Modal with dimmed backdrop, centered near top
+    let modal = egui::Modal::new(Id::unique("command_palette_modal"))
+        .backdrop_color(Color32::from_black_alpha(150))
         .frame(
-            Frame::NONE
-                .fill(t.card)
-                .stroke(Stroke::new(1.0, t.card_border))
-                .corner_radius(CornerRadius::same(t.radius_lg as u8))
-                .inner_margin(Margin::same(14)),
+            theme::modal_frame(&t)
+                .inner_margin(Margin::same(14))
+                .corner_radius(CornerRadius::same(t.radius_lg as u8)),
         )
-        .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Find:").color(t.text_dim).strong());
-                let text_edit = egui::TextEdit::singleline(&mut state.command_palette_query)
-                    .hint_text("Type note name or prefix to search...")
-                    .frame(Frame::NONE)
-                    .desired_width(f32::INFINITY);
-                let response = ui.add(text_edit);
-                response.request_focus();
+        .area(
+            egui::Area::new(Id::unique("command_palette_area"))
+                .anchor(Align2::CENTER_TOP, vec2(0.0, 90.0))
+                .order(egui::Order::Foreground)
+                .interactable(true),
+        );
+
+    let modal_resp = modal.show(ctx, |ui| {
+        ui.set_width(540.0);
+
+        // Header / Search input
+        Frame::NONE
+            .fill(t.field)
+            .stroke(Stroke::new(1.0, t.field_border))
+            .corner_radius(CornerRadius::same(t.radius_sm as u8))
+            .inner_margin(Margin::symmetric(10, 8))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    theme::icon_search(ui, 14.0, t.text_dim);
+                    let edit = ui.add(
+                        egui::TextEdit::singleline(&mut state.command_palette_query)
+                            .hint_text("Type note name or keywords to search…")
+                            .frame(Frame::NONE)
+                            .desired_width(ui.available_width() - 28.0),
+                    );
+                    edit.request_focus();
+
+                    if edit.changed() {
+                        state.command_palette_selected = 0;
+                    }
+
+                    if !state.command_palette_query.is_empty()
+                        && theme::icon_close_button(ui, &t).clicked()
+                    {
+                        state.command_palette_query.clear();
+                        state.command_palette_selected = 0;
+                    }
+                });
             });
 
-            ui.add_space(8.0);
-            ui.separator();
+        // Keyboard navigation (Up / Down / Enter)
+        let (down, up, enter) = ctx.input(|i| {
+            (
+                i.key_pressed(egui::Key::ArrowDown),
+                i.key_pressed(egui::Key::ArrowUp),
+                i.key_pressed(egui::Key::Enter),
+            )
+        });
 
-            let hits: Vec<NoteId> = if state.command_palette_query.trim().is_empty() {
-                state.vault.notes().take(12).map(|n| n.id.clone()).collect()
-            } else {
-                state
-                    .vault
-                    .search(&state.command_palette_query)
-                    .into_iter()
-                    .take(15)
-                    .map(|h| h.id)
-                    .collect()
-            };
+        if down && hits_len > 0 {
+            state.command_palette_selected = (state.command_palette_selected + 1).min(hits_len - 1);
+        }
+        if up && hits_len > 0 {
+            state.command_palette_selected = state.command_palette_selected.saturating_sub(1);
+        }
+        if enter {
+            if hits_len > 0 && state.command_palette_selected < hits_len {
+                note_to_open = Some(hits[state.command_palette_selected].clone());
+                close = true;
+            } else if !state.command_palette_query.trim().is_empty() {
+                note_to_create = Some(state.command_palette_query.trim().to_string());
+                close = true;
+            }
+        }
 
-            ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 4.0;
+        ui.add_space(8.0);
+
+        // Results list
+        ScrollArea::vertical()
+            .id_salt("cmd_palette_scroll")
+            .max_height(340.0)
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
 
                 if hits.is_empty() {
-                    ui.label(RichText::new("No matching notes found.").color(t.text_faint));
-                    if !state.command_palette_query.trim().is_empty() {
-                        let query = state.command_palette_query.trim().to_string();
-                        if ui.button(RichText::new(format!("+ Create \"{}\"", query)).color(t.accent_text)).clicked() {
-                            note_to_create = Some(query);
-                            should_close = true;
+                    ui.add_space(14.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(RichText::new("No notes found matching your search.").color(t.text_dim).size(13.0));
+                        if !state.command_palette_query.trim().is_empty() {
+                            ui.add_space(8.0);
+                            let query = state.command_palette_query.trim().to_string();
+                            if ui.button(RichText::new(format!("+ Create \"{query}\"")).color(t.accent_text).strong()).clicked() {
+                                note_to_create = Some(query);
+                                close = true;
+                            }
                         }
-                    }
+                    });
+                    ui.add_space(14.0);
                 } else {
-                    for id in hits {
-                        let title = id.name().to_string();
-                        let folder = id.folder().map(|s| s.to_string());
+                    for (idx, id) in hits.iter().enumerate() {
+                        let is_active = idx == state.command_palette_selected;
+                        let dot = theme::note_kind_color(id.as_str(), &t);
+                        let row_resp = theme::list_row(
+                            ui,
+                            &t,
+                            is_active,
+                            Some(dot),
+                            id.name(),
+                            id.folder(),
+                        );
 
-                        let btn_frame = Frame::NONE
-                            .corner_radius(CornerRadius::same(t.radius_sm as u8))
-                            .inner_margin(Margin::symmetric(8, 6));
-
-                        btn_frame.show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new("•").color(t.accent_text));
-                                if ui.selectable_label(false, RichText::new(&title).strong().color(t.text)).clicked() {
-                                    note_to_open = Some(id.clone());
-                                    should_close = true;
-                                }
-
-                                if let Some(f) = folder {
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        ui.label(RichText::new(f).color(t.text_faint).size(10.0));
-                                    });
-                                }
-                            });
-                        });
+                        if row_resp.clicked() {
+                            note_to_open = Some(id.clone());
+                            close = true;
+                        } else if row_resp.hovered() {
+                            state.command_palette_selected = idx;
+                        }
                     }
                 }
             });
 
-            // Close on Escape
-            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                should_close = true;
-            }
+        ui.add_space(8.0);
+        theme::bottom_hairline(ui, ui.max_rect(), &t);
+        ui.add_space(6.0);
+
+        // Footer shortcuts guide
+        ui.horizontal(|ui| {
+            let hint = |key: &str, desc: &str| {
+                RichText::new(format!("[{key}] {desc}")).size(10.5).color(t.text_faint)
+            };
+            ui.label(hint("↑/↓", "navigate"));
+            ui.label(hint("Enter", "open"));
+            ui.label(hint("Esc", "close"));
         });
+    });
+
+    if modal_resp.should_close() || close {
+        state.show_command_palette = false;
+        state.command_palette_query.clear();
+        state.command_palette_selected = 0;
+    }
 
     if let Some(id) = note_to_open {
         state.open_note(id);
     }
     if let Some(target) = note_to_create {
         state.open_or_create(&target);
-    }
-    if !open || should_close {
-        state.show_command_palette = false;
-        state.command_palette_query.clear();
     }
 }

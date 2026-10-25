@@ -252,6 +252,71 @@ impl Vault {
         hits
     }
 
+    /// Returns relative paths of all `*.canvas` files in the vault.
+    pub fn list_canvas_files(&self) -> Vec<String> {
+        let walker = WalkDir::new(&self.root)
+            .follow_links(true)
+            .into_iter()
+            .filter_entry(|e| e.depth() == 0 || !is_hidden(e.path()));
+
+        let mut res = Vec::new();
+        for entry in walker.filter_map(std::result::Result::ok) {
+            let path = entry.path();
+            if entry.file_type().is_file()
+                && path.extension().and_then(|e| e.to_str()) == Some("canvas")
+            {
+                if let Ok(rel) = path.strip_prefix(&self.root) {
+                    res.push(rel.to_string_lossy().into_owned());
+                }
+            }
+        }
+        res.sort();
+        res
+    }
+
+    /// Loads a `.canvas` file by path relative to vault root.
+    pub fn load_canvas(&self, rel_path: &str) -> Result<crate::canvas::CanvasFile> {
+        let path = self.root.join(rel_path);
+        let content = fs::read_to_string(&path).map_err(|e| Error::io(&path, e))?;
+        crate::canvas::CanvasFile::parse(&content)
+            .map_err(|e| Error::InvalidEvent(format!("failed to parse canvas '{rel_path}': {e}")))
+    }
+
+    /// Saves a `.canvas` document atomically to disk.
+    pub fn save_canvas(&self, rel_path: &str, canvas: &crate::canvas::CanvasFile) -> Result<()> {
+        let path = self.root.join(rel_path);
+        ensure_parent(&path)?;
+        let json = canvas
+            .to_string_pretty()
+            .map_err(|e| Error::InvalidEvent(format!("failed to serialize canvas: {e}")))?;
+        atomic_write(&path, &json)
+    }
+
+    /// All directories relative to vault root.
+    pub fn all_folders(&self) -> Vec<String> {
+        let walker = WalkDir::new(&self.root)
+            .follow_links(true)
+            .into_iter()
+            .filter_entry(|e| e.depth() == 0 || !is_hidden(e.path()));
+
+        let mut folders = Vec::new();
+        for entry in walker.filter_map(std::result::Result::ok) {
+            if entry.depth() > 0 && entry.file_type().is_dir() {
+                if let Ok(rel) = entry.path().strip_prefix(&self.root) {
+                    folders.push(rel.to_string_lossy().into_owned());
+                }
+            }
+        }
+        folders.sort();
+        folders
+    }
+
+    /// Creates a directory relative to the vault root.
+    pub fn create_folder(&self, rel_path: &str) -> Result<()> {
+        let path = self.root.join(rel_path);
+        fs::create_dir_all(&path).map_err(|e| Error::io(&path, e))
+    }
+
     // ----------------------------------------------------------------- private
 
     fn write(&mut self, id: NoteId, content: &str) -> Result<()> {
@@ -442,5 +507,34 @@ mod tests {
         let hits = v.search("rust");
         assert_eq!(hits[0].id, id("Rust"));
         assert_eq!(hits[1].snippet.as_deref(), Some("mentions rust"));
+    }
+
+    #[test]
+    fn folder_creation_and_listing() {
+        let (_d, v) = vault();
+        v.create_folder("Projects/Alpha").unwrap();
+        v.create_folder("Archive").unwrap();
+        let folders = v.all_folders();
+        assert!(folders.contains(&"Projects/Alpha".to_string()));
+        assert!(folders.contains(&"Projects".to_string()));
+        assert!(folders.contains(&"Archive".to_string()));
+    }
+
+    #[test]
+    fn canvas_save_load_list() {
+        use crate::canvas::CanvasFile;
+
+        let (_d, v) = vault();
+        assert!(v.list_canvas_files().is_empty());
+
+        let mut canvas = CanvasFile::new();
+        canvas.add_text_node("Hello Canvas", 10.0, 20.0, 200.0, 100.0);
+
+        v.save_canvas("diagrams/flow.canvas", &canvas).unwrap();
+        let list = v.list_canvas_files();
+        assert_eq!(list, vec!["diagrams/flow.canvas".to_string()]);
+
+        let loaded = v.load_canvas("diagrams/flow.canvas").unwrap();
+        assert_eq!(loaded.nodes.len(), 1);
     }
 }
