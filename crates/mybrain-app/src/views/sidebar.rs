@@ -52,7 +52,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     // Header: Sidebar section switcher + collapse toggle button
     ui.horizontal(|ui| {
-        let section = state.sidebar_section;
+        let section = match state.sidebar_section {
+            SidebarSection::Events => SidebarSection::Daily,
+            s => s,
+        };
         if let Some(new_sec) = theme::segmented(
             ui,
             &t,
@@ -60,7 +63,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             &[
                 (SidebarSection::Notes, "Notes"),
                 (SidebarSection::Daily, "Daily"),
-                (SidebarSection::Events, "Events"),
+                (SidebarSection::Quick, "Quick"),
             ],
         ) {
             state.sidebar_section = new_sec;
@@ -86,11 +89,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         SidebarSection::Notes => {
             render_notes_section(ui, state, &t);
         }
-        SidebarSection::Daily => {
+        SidebarSection::Daily | SidebarSection::Events => {
             render_daily_section(ui, state, &t);
         }
-        SidebarSection::Events => {
-            render_events_section(ui, state, &t);
+        SidebarSection::Quick => {
+            render_quick_section(ui, state, &t);
         }
     }
 }
@@ -131,7 +134,18 @@ fn render_note_item(
         )
     };
 
-    theme::list_row(ui, t, selected, dot, id.name(), trail.as_deref())
+    let resp = theme::list_row(ui, t, selected, dot, id.name(), trail.as_deref());
+    if resp.drag_started() {
+        egui::DragAndDrop::set_payload(
+            ui.ctx(),
+            crate::state::DraggedNote {
+                id: id.as_str().to_string(),
+                name: id.name().to_string(),
+                is_canvas: false,
+            },
+        );
+    }
+    resp
 }
 
 /// Helper to render a canvas item.
@@ -156,7 +170,18 @@ fn render_canvas_item(
     };
     let dot = Some(t.accent_text);
     let trail = folder_trail.unwrap_or("Canvas");
-    theme::list_row(ui, t, selected, dot, display_name, Some(trail))
+    let resp = theme::list_row(ui, t, selected, dot, display_name, Some(trail));
+    if resp.drag_started() {
+        egui::DragAndDrop::set_payload(
+            ui.ctx(),
+            crate::state::DraggedNote {
+                id: canvas_path.to_string(),
+                name: display_name.to_string(),
+                is_canvas: true,
+            },
+        );
+    }
+    resp
 }
 
 /// Recursively render a folder node.
@@ -189,26 +214,31 @@ fn render_folder_node(
                 ui.label(RichText::new(format!("{count}")).size(10.5).color(t.text_faint));
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let is_reserved = state.is_reserved_special_folder(full_path);
                     ui.menu_button("+", |ui| {
-                        if ui.button("New Note").clicked() {
-                            *folder_action =
-                                Some(FolderAction::NewNote(Some(full_path.to_string())));
-                            ui.close();
+                        if !is_reserved {
+                            if ui.button("New Note").clicked() {
+                                *folder_action =
+                                    Some(FolderAction::NewNote(Some(full_path.to_string())));
+                                ui.close();
+                            }
                         }
                         if ui.button("New Event").clicked() {
                             *folder_action =
                                 Some(FolderAction::NewEvent(Some(full_path.to_string())));
                             ui.close();
                         }
-                        if ui.button("New Canvas").clicked() {
-                            *folder_action =
-                                Some(FolderAction::NewCanvas(Some(full_path.to_string())));
-                            ui.close();
-                        }
-                        if ui.button("New Subfolder").clicked() {
-                            *folder_action =
-                                Some(FolderAction::NewSubfolder(Some(full_path.to_string())));
-                            ui.close();
+                        if !is_reserved {
+                            if ui.button("New Canvas").clicked() {
+                                *folder_action =
+                                    Some(FolderAction::NewCanvas(Some(full_path.to_string())));
+                                ui.close();
+                            }
+                            if ui.button("New Subfolder").clicked() {
+                                *folder_action =
+                                    Some(FolderAction::NewSubfolder(Some(full_path.to_string())));
+                                ui.close();
+                            }
                         }
                     });
                 });
@@ -250,17 +280,20 @@ fn render_folder_node(
             }
 
             if node.is_empty() {
+                let is_reserved = state.is_reserved_special_folder(full_path);
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("(empty)").color(t.text_faint).size(11.0).italics());
-                    if theme::ghost_button(
-                        ui,
-                        t,
-                        RichText::new("+ note").color(t.accent_text).size(11.0),
-                    )
-                    .clicked()
-                    {
-                        *folder_action =
-                            Some(FolderAction::NewNote(Some(full_path.to_string())));
+                    if !is_reserved {
+                        if theme::ghost_button(
+                            ui,
+                            t,
+                            RichText::new("+ note").color(t.accent_text).size(11.0),
+                        )
+                        .clicked()
+                        {
+                            *folder_action =
+                                Some(FolderAction::NewNote(Some(full_path.to_string())));
+                        }
                     }
                 });
             }
@@ -487,11 +520,15 @@ fn render_notes_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
     }
 }
 
-/// Daily Notes section in sidebar: date switcher and timeline entries.
+/// Daily Notes section in sidebar: date switcher, scheduled events, and timeline entries.
 fn render_daily_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
     ui.horizontal(|ui| {
-        theme::section_label(ui, t, "Daily Notes");
+        theme::section_label(ui, t, "Daily & Events");
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if theme::ghost_button(ui, t, RichText::new("+ Event").color(t.success).size(11.5)).clicked() {
+                state.new_event_draft = EventDraft::new(state.selected_daily_date);
+                state.show_new_event_dialog = true;
+            }
             if theme::ghost_button(ui, t, RichText::new("Today").color(t.accent_text).size(11.5)).clicked() {
                 state.open_daily_today();
             }
@@ -521,7 +558,85 @@ fn render_daily_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
         });
 
     ui.add_space(4.0);
-    ui.label(RichText::new("Recent Timeline").color(t.text_faint).size(11.0));
+
+    // Events on Selected Date
+    let day_events = state.event_store.on(&state.vault, state.selected_daily_date);
+    let is_today = state.selected_daily_date == Local::now().date_naive();
+    let day_title = if is_today {
+        "Today's Events".to_string()
+    } else {
+        format!("Events ({})", state.selected_daily_date.format("%b %-d"))
+    };
+
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(day_title).color(t.text_dim).size(11.5).strong());
+        if !day_events.is_empty() {
+            theme::pill(ui, &format!("{}", day_events.len()), t.warning, t.accent_soft);
+        }
+    });
+
+    let mut event_to_open = None;
+
+    if day_events.is_empty() {
+        ui.label(RichText::new("  No events scheduled").color(t.text_faint).size(11.0));
+    } else {
+        for ev in day_events {
+            let is_active = state.active_note.as_ref() == Some(&ev.id);
+            let time_label = ev.time_label();
+            let resp = theme::list_row(ui, t, is_active, Some(t.warning), &ev.title, Some(&time_label));
+            if resp.drag_started() {
+                egui::DragAndDrop::set_payload(
+                    ui.ctx(),
+                    crate::state::DraggedNote {
+                        id: ev.id.as_str().to_string(),
+                        name: ev.id.name().to_string(),
+                        is_canvas: false,
+                    },
+                );
+            }
+            if resp.clicked() {
+                event_to_open = Some(ev.id.clone());
+            }
+        }
+    }
+
+    if let Some(id) = event_to_open {
+        state.open_note(id);
+    }
+
+    // Upcoming Events (next 14 days)
+    let tomorrow = state.selected_daily_date.succ_opt().unwrap_or(state.selected_daily_date);
+    let next_two_weeks = state.selected_daily_date.checked_add_days(chrono::Days::new(14)).unwrap_or(state.selected_daily_date);
+    let upcoming = state.event_store.between(&state.vault, tomorrow, next_two_weeks);
+    if !upcoming.is_empty() {
+        ui.add_space(4.0);
+        ui.label(RichText::new("Upcoming Events").color(t.text_faint).size(11.0));
+        let mut upcoming_to_open = None;
+        for ev in upcoming {
+            let is_active = state.active_note.as_ref() == Some(&ev.id);
+            let date_str = ev.date.format("%b %-d").to_string();
+            let resp = theme::list_row(ui, t, is_active, Some(t.warning), &ev.title, Some(&date_str));
+            if resp.drag_started() {
+                egui::DragAndDrop::set_payload(
+                    ui.ctx(),
+                    crate::state::DraggedNote {
+                        id: ev.id.as_str().to_string(),
+                        name: ev.id.name().to_string(),
+                        is_canvas: false,
+                    },
+                );
+            }
+            if resp.clicked() {
+                upcoming_to_open = Some(ev.id.clone());
+            }
+        }
+        if let Some(id) = upcoming_to_open {
+            state.open_note(id);
+        }
+    }
+
+    ui.add_space(4.0);
+    ui.label(RichText::new("Daily Notes Timeline").color(t.text_faint).size(11.0));
 
     let existing = state.daily_config.existing_dates(&state.vault);
     let mut to_open = None;
@@ -546,7 +661,18 @@ fn render_daily_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
 
                     let trail = if is_today { Some("Today") } else { None };
                     let title = date.format("%Y-%m-%d (%a)").to_string();
-                    if theme::list_row(ui, t, is_active, Some(t.accent), &title, trail).clicked() {
+                    let resp = theme::list_row(ui, t, is_active, Some(t.accent), &title, trail);
+                    if resp.drag_started() {
+                        egui::DragAndDrop::set_payload(
+                            ui.ctx(),
+                            crate::state::DraggedNote {
+                                id: id.as_str().to_string(),
+                                name: id.name().to_string(),
+                                is_canvas: false,
+                            },
+                        );
+                    }
+                    if resp.clicked() {
                         to_open = Some(date);
                     }
                 }
@@ -558,41 +684,96 @@ fn render_daily_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
     }
 }
 
-/// Calendar Events section in sidebar: list of upcoming events.
-fn render_events_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
+/// Google Keep / Quick Notes section in sidebar: list of quick notes with color dots and filter.
+fn render_quick_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
     ui.horizontal(|ui| {
-        theme::section_label(ui, t, "Calendar Events");
+        theme::section_label(ui, t, "Quick Notes");
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if theme::ghost_button(ui, t, RichText::new("+ Event").color(t.success).size(11.5)).clicked() {
-                state.new_event_draft.date = Local::now().date_naive();
-                state.show_new_event_dialog = true;
+            if theme::ghost_button(ui, t, RichText::new("+ Note").color(t.accent_text).size(11.5)).clicked() {
+                state.quick_composer_expanded = true;
             }
         });
     });
 
-    let events = state.event_store.all(&state.vault);
-    let mut to_open = None;
+    // Filter box
+    Frame::NONE
+        .fill(t.field)
+        .corner_radius(CornerRadius::same(t.radius_sm as u8))
+        .stroke(Stroke::new(1.0, t.field_border))
+        .inner_margin(Margin::symmetric(8, 3))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                theme::icon_search(ui, 12.0, t.text_faint);
+                ui.add(
+                    egui::TextEdit::singleline(&mut state.quick_search_query)
+                        .hint_text("Search Quick notes…")
+                        .frame(Frame::NONE)
+                        .desired_width(ui.available_width() - 26.0),
+                );
+                if !state.quick_search_query.is_empty() && theme::icon_close_button(ui, t).clicked() {
+                    state.quick_search_query.clear();
+                }
+            });
+        });
+
+    ui.add_space(2.0);
+
+    let all_notes = state.quick_config.all(&state.vault);
+    let mut to_edit: Option<NoteId> = None;
 
     ScrollArea::vertical()
-        .id_salt("sidebar_events_scroll")
+        .id_salt("sidebar_quick_scroll")
         .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 3.0;
+            ui.spacing_mut().item_spacing.y = 2.0;
 
-            if events.is_empty() {
+            let query = state.quick_search_query.trim().to_lowercase();
+            let filtered: Vec<&mybrain_core::Note> = all_notes
+                .into_iter()
+                .filter(|n| {
+                    if query.is_empty() {
+                        true
+                    } else {
+                        n.title().to_lowercase().contains(&query)
+                            || n.body().to_lowercase().contains(&query)
+                    }
+                })
+                .collect();
+
+            if filtered.is_empty() {
                 ui.add_space(6.0);
-                ui.label(RichText::new("  No scheduled events").color(t.text_faint).size(12.0));
+                ui.label(RichText::new("  No quick notes found").color(t.text_faint).size(12.0));
             } else {
-                for event in events {
-                    let is_active = state.active_note.as_ref() == Some(&event.id);
-                    let date_str = event.date.format("%b %-d").to_string();
-                    if theme::list_row(ui, t, is_active, Some(t.warning), &event.title, Some(&date_str)).clicked() {
-                        to_open = Some(event.id.clone());
+                for note in filtered {
+                    let fm = note.frontmatter();
+                    let is_pinned = fm.get("pinned") == Some("true");
+                    let color_name = fm.get("color");
+                    let dot_color = if let Some(c) = color_name {
+                        crate::views::quick_capture::QUICK_COLORS
+                            .iter()
+                            .find(|def| def.name.eq_ignore_ascii_case(c))
+                            .map(|def| def.dot_color)
+                            .unwrap_or(t.warning)
+                    } else {
+                        t.warning
+                    };
+
+                    let title = fm
+                        .get("title")
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| note.title().to_string());
+
+                    let trail = if is_pinned { Some("Pinned") } else { None };
+                    let selected = state.quick_edit_note.as_ref() == Some(&note.id);
+
+                    if theme::list_row(ui, t, selected, Some(dot_color), &title, trail).clicked() {
+                        to_edit = Some(note.id.clone());
                     }
                 }
             }
         });
 
-    if let Some(id) = to_open {
-        state.open_note(id);
+    if let Some(id) = to_edit {
+        state.open_quick_edit(id);
     }
 }
+

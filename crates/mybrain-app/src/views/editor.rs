@@ -63,6 +63,55 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         ui.label(RichText::new("/").color(t.text_faint).size(12.0));
                     }
                     ui.label(RichText::new(active_id.name()).color(t.text).strong().size(15.0));
+
+                    // Daily Note badge & jump to Calendar
+                    if let Some(daily_date) = state.daily_config.date_of(&active_id) {
+                        ui.add_space(4.0);
+                        theme::pill(ui, "Daily Note", t.accent_text, t.accent_soft);
+
+                        let events_count = state.event_store.on(&state.vault, daily_date).len();
+                        if events_count > 0 {
+                            theme::pill(ui, &format!("{events_count} event{}", if events_count == 1 { "" } else { "s" }), t.warning, t.accent_soft);
+                        }
+
+                        if theme::ghost_button(ui, &t, RichText::new("+ Event").size(11.5).color(t.success))
+                            .on_hover_text("Schedule an event for this date")
+                            .clicked()
+                        {
+                            state.new_event_draft = mybrain_core::EventDraft::new(daily_date);
+                            state.show_new_event_dialog = true;
+                        }
+
+                        if events_count > 0 {
+                            if theme::ghost_button(ui, &t, RichText::new("Sync Events").size(11.5).color(t.accent_text))
+                                .on_hover_text("Synchronize scheduled events into note body")
+                                .clicked()
+                            {
+                                state.sync_events_to_daily_note(daily_date);
+                            }
+                        }
+
+                        if theme::ghost_button(ui, &t, RichText::new("Calendar ↗").size(11.5).color(t.accent_text))
+                            .on_hover_text("View in Daily Calendar")
+                            .clicked()
+                        {
+                            state.selected_daily_date = daily_date;
+                            state.sidebar_section = crate::state::SidebarSection::Daily;
+                        }
+                    }
+
+                    // Event badge & jump to Agenda
+                    let event_info = state.vault.get(&active_id).and_then(|n| mybrain_core::Event::from_note(n));
+                    if let Some(ev) = event_info {
+                        ui.add_space(4.0);
+                        theme::pill(ui, &format!("Event: {}", ev.time_label()), t.warning, t.accent_soft);
+                        if theme::ghost_button(ui, &t, RichText::new("Agenda ↗").size(11.5).color(t.warning))
+                            .on_hover_text("View in Events Agenda")
+                            .clicked()
+                        {
+                            state.sidebar_section = crate::state::SidebarSection::Events;
+                        }
+                    }
                 });
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -160,37 +209,76 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 }
 
 fn render_editor_pane(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
-    Frame::NONE
-        .fill(t.canvas)
-        .inner_margin(Margin::symmetric(28, 16))
-        .show(ui, |ui| {
-            ScrollArea::vertical()
-                .id_salt("editor_scroll")
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    let mut layouter = |ui: &Ui, buf: &dyn TextBuffer, wrap_width: f32| {
-                        let mut layout_job = highlight_markdown(buf.as_str(), t);
-                        layout_job.wrap.max_width = wrap_width;
-                        ui.ctx().fonts_mut(|f| f.layout_job(layout_job))
-                    };
+    let is_dragged = egui::DragAndDrop::has_payload_of_type::<crate::state::DraggedNote>(ui.ctx());
 
-                    let output = egui::TextEdit::multiline(&mut state.editor_buffer)
-                        .code_editor()
-                        .desired_width(f32::INFINITY)
-                        .layouter(&mut layouter)
-                        .frame(Frame::NONE)
-                        .show(ui);
+    let frame = if is_dragged {
+        Frame::NONE
+            .fill(t.canvas)
+            .stroke(Stroke::new(1.5, t.accent))
+            .inner_margin(Margin::symmetric(28, 16))
+    } else {
+        Frame::NONE
+            .fill(t.canvas)
+            .inner_margin(Margin::symmetric(28, 16))
+    };
 
-                    if output.response.changed() {
-                        state.editor_dirty = true;
-                    }
+    let frame_resp = frame.show(ui, |ui| {
+        if is_dragged {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Drop note anywhere to insert [[link]]").strong().color(t.accent_text).size(12.0));
+            });
+            ui.add_space(6.0);
+        }
 
-                    // Wiki-link autocomplete popup when typing `[[`
-                    render_link_autocomplete(ui, state, &output, t);
+        ScrollArea::vertical()
+            .id_salt("editor_scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                // Integrated Scheduled Events card if this is a daily note
+                let maybe_daily_date = state.active_note.as_ref().and_then(|id| state.daily_config.date_of(id));
+                if let Some(daily_date) = maybe_daily_date {
+                    render_daily_events_widget(ui, state, daily_date, t);
+                    ui.add_space(12.0);
+                }
 
-                    ui.add_space(80.0);
-                });
-        });
+                let mut layouter = |ui: &Ui, buf: &dyn TextBuffer, wrap_width: f32| {
+                    let mut layout_job = highlight_markdown(buf.as_str(), t);
+                    layout_job.wrap.max_width = wrap_width;
+                    ui.ctx().fonts_mut(|f| f.layout_job(layout_job))
+                };
+
+                let output = egui::TextEdit::multiline(&mut state.editor_buffer)
+                    .code_editor()
+                    .desired_width(f32::INFINITY)
+                    .layouter(&mut layouter)
+                    .frame(Frame::NONE)
+                    .show(ui);
+
+                if output.response.changed() {
+                    state.editor_dirty = true;
+                }
+
+                // Wiki-link autocomplete popup when typing `[[`
+                render_link_autocomplete(ui, state, &output, t);
+
+                ui.add_space(80.0);
+            });
+    });
+
+    if let Some(hover_pos) = ui.input(|i| i.pointer.hover_pos()) {
+        if frame_resp.response.rect.contains(hover_pos) && ui.input(|i| i.pointer.any_released()) {
+            if let Some(dragged) = egui::DragAndDrop::take_payload::<crate::state::DraggedNote>(ui.ctx()) {
+                let link_str = format!("[[{}]]", dragged.name);
+                if !state.editor_buffer.is_empty() && !state.editor_buffer.ends_with(' ') && !state.editor_buffer.ends_with('\n') {
+                    state.editor_buffer.push(' ');
+                }
+                state.editor_buffer.push_str(&link_str);
+                state.editor_buffer.push(' ');
+                state.editor_dirty = true;
+                state.set_status(format!("Linked note: {link_str}"));
+            }
+        }
+    }
 }
 
 fn render_link_autocomplete(
@@ -257,14 +345,31 @@ fn render_link_autocomplete(
 }
 
 fn render_preview_pane(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
-    Frame::NONE
-        .fill(t.canvas)
-        .inner_margin(Margin::symmetric(28, 16))
-        .show(ui, |ui| {
-            ScrollArea::vertical()
-                .id_salt("preview_scroll")
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
+    let is_dragged = egui::DragAndDrop::has_payload_of_type::<crate::state::DraggedNote>(ui.ctx());
+
+    let frame = if is_dragged {
+        Frame::NONE
+            .fill(t.canvas)
+            .stroke(Stroke::new(1.5, t.accent))
+            .inner_margin(Margin::symmetric(28, 16))
+    } else {
+        Frame::NONE
+            .fill(t.canvas)
+            .inner_margin(Margin::symmetric(28, 16))
+    };
+
+    let frame_resp = frame.show(ui, |ui| {
+        if is_dragged {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Drop note anywhere to insert [[link]]").strong().color(t.accent_text).size(12.0));
+            });
+            ui.add_space(6.0);
+        }
+
+        ScrollArea::vertical()
+            .id_salt("preview_scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
                     ui.vertical(|ui| {
                         ui.set_max_width(theme::READABLE_WIDTH);
 
@@ -275,6 +380,13 @@ fn render_preview_pane(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
                             ui.add_space(14.0);
                             ui.separator();
                             ui.add_space(10.0);
+                        }
+
+                        // Integrated Scheduled Events card if this is a daily note
+                        let maybe_daily_date = state.active_note.as_ref().and_then(|id| state.daily_config.date_of(id));
+                        if let Some(daily_date) = maybe_daily_date {
+                            render_daily_events_widget(ui, state, daily_date, t);
+                            ui.add_space(12.0);
                         }
 
                         // 2. Note title if not explicitly started with H1
@@ -389,6 +501,89 @@ fn render_preview_pane(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
                     });
                 });
         });
+
+    if let Some(hover_pos) = ui.input(|i| i.pointer.hover_pos()) {
+        if frame_resp.response.rect.contains(hover_pos) && ui.input(|i| i.pointer.any_released()) {
+            if let Some(dragged) = egui::DragAndDrop::take_payload::<crate::state::DraggedNote>(ui.ctx()) {
+                let link_str = format!("[[{}]]", dragged.name);
+                if !state.editor_buffer.is_empty() && !state.editor_buffer.ends_with(' ') && !state.editor_buffer.ends_with('\n') {
+                    state.editor_buffer.push(' ');
+                }
+                state.editor_buffer.push_str(&link_str);
+                state.editor_buffer.push(' ');
+                state.editor_dirty = true;
+                state.set_status(format!("Linked note: {link_str}"));
+            }
+        }
+    }
+}
+
+/// Integrated widget displaying scheduled events for a daily note with quick actions.
+fn render_daily_events_widget(
+    ui: &mut Ui,
+    state: &mut AppState,
+    date: chrono::NaiveDate,
+    t: &Tokens,
+) {
+    let events = state.event_store.on(&state.vault, date);
+    let card = theme::card_frame(t, false)
+        .inner_margin(Margin::symmetric(14, 10));
+
+    let mut event_to_open = None;
+    let mut add_event_clicked = false;
+    let mut sync_clicked = false;
+
+    card.show(ui, |ui| {
+        ui.horizontal(|ui| {
+            theme::section_label(ui, t, &format!("Scheduled Events ({})", events.len()));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if theme::ghost_button(ui, t, RichText::new("+ Add Event").color(t.success).size(11.5)).clicked() {
+                    add_event_clicked = true;
+                }
+                if !events.is_empty() {
+                    if theme::ghost_button(ui, t, RichText::new("Sync into Note").color(t.accent_text).size(11.5))
+                        .on_hover_text("Insert event checkboxes into note text")
+                        .clicked()
+                    {
+                        sync_clicked = true;
+                    }
+                }
+            });
+        });
+
+        ui.add_space(4.0);
+
+        if events.is_empty() {
+            ui.label(RichText::new("No events scheduled for this day.").color(t.text_faint).size(11.5).italics());
+        } else {
+            for ev in &events {
+                ui.horizontal(|ui| {
+                    theme::pill(ui, &ev.time_label(), t.warning, t.accent_soft);
+                    ui.label(RichText::new(&ev.title).strong().size(12.5).color(t.text));
+                    if let Some(loc) = &ev.location {
+                        ui.label(RichText::new(format!("• {loc}")).size(11.5).color(t.text_dim));
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if theme::ghost_button(ui, t, RichText::new("Open Note →").color(t.accent_text)).clicked() {
+                            event_to_open = Some(ev.id.clone());
+                        }
+                    });
+                });
+                ui.add_space(2.0);
+            }
+        }
+    });
+
+    if let Some(id) = event_to_open {
+        state.open_note(id);
+    }
+    if add_event_clicked {
+        state.new_event_draft = mybrain_core::EventDraft::new(date);
+        state.show_new_event_dialog = true;
+    }
+    if sync_clicked {
+        state.sync_events_to_daily_note(date);
+    }
 }
 
 /// Renders an Obsidian 1.4+ style collapsible Properties / Metadata block

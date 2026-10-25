@@ -544,6 +544,44 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         }
     }
 
+    // Drag-and-drop linking of notes onto canvas
+    if let Some(hover_pos) = ui.input(|i| i.pointer.hover_pos()) {
+        if response_rect.contains(hover_pos) {
+            if let Some(dragged) = egui::DragAndDrop::payload::<crate::state::DraggedNote>(ui.ctx()) {
+                let ghost_rect = Rect::from_center_size(hover_pos, vec2(240.0 * zoom, 140.0 * zoom));
+                painter.rect(
+                    ghost_rect,
+                    CornerRadius::same(t.radius as u8),
+                    t.card,
+                    Stroke::new(2.0, t.accent),
+                    egui::StrokeKind::Inside,
+                );
+                painter.text(
+                    ghost_rect.center(),
+                    Align2::CENTER_CENTER,
+                    format!("Drop [[{}]]", dragged.name),
+                    FontId::proportional((13.0 * zoom).clamp(10.0, 18.0)),
+                    t.accent_text,
+                );
+            }
+
+            if ui.input(|i| i.pointer.any_released()) {
+                if let Some(dragged) = egui::DragAndDrop::take_payload::<crate::state::DraggedNote>(ui.ctx()) {
+                    let (wx, wy) = to_world(hover_pos);
+                    let file_path = if dragged.is_canvas {
+                        dragged.id.clone()
+                    } else if dragged.id.ends_with(".md") {
+                        dragged.id.clone()
+                    } else {
+                        format!("{}.md", dragged.id)
+                    };
+                    add_file_at = Some((file_path, wx, wy));
+                    state.set_status(format!("Added [[{}]] to canvas", dragged.name));
+                }
+            }
+        }
+    }
+
     // Apply recorded mutations to state.canvas_doc
     if let Some((from_id, to_id)) = new_edge {
         if let Some(ref mut d) = state.canvas_doc {

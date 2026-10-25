@@ -20,6 +20,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let mut date_to_open: Option<NaiveDate> = None;
     let mut event_to_open: Option<NoteId> = None;
     let mut open_event_dialog = false;
+    let mut sync_events_date: Option<NaiveDate> = None;
 
     ScrollArea::vertical()
         .id_salt("daily_view_scroll")
@@ -36,6 +37,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         state.daily_view_mode,
                         &[
                             (DailyViewMode::MonthGrid, "Month Calendar"),
+                            (DailyViewMode::Agenda, "Events Agenda"),
                             (DailyViewMode::Timeline, "Timeline List"),
                         ],
                     ) {
@@ -98,7 +100,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                             &mut date_to_open,
                             &mut event_to_open,
                             &mut open_event_dialog,
+                            &mut sync_events_date,
                         );
+                    }
+                    DailyViewMode::Agenda => {
+                        crate::views::events_view::show(ui, state);
                     }
                     DailyViewMode::Timeline => {
                         render_timeline_list(ui, state, &t, &mut date_to_open);
@@ -121,6 +127,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         state.new_event_draft = EventDraft::new(state.selected_daily_date);
         state.show_new_event_dialog = true;
     }
+    if let Some(d) = sync_events_date {
+        state.sync_events_to_daily_note(d);
+    }
 }
 
 /// Render the interactive 7-column monthly calendar grid.
@@ -132,6 +141,7 @@ fn render_month_calendar(
     date_to_open: &mut Option<NaiveDate>,
     event_to_open: &mut Option<NoteId>,
     open_event_dialog: &mut bool,
+    sync_events_date: &mut Option<NaiveDate>,
 ) {
     let year = state.calendar_view_date.year();
     let month = state.calendar_view_date.month();
@@ -352,7 +362,7 @@ fn render_month_calendar(
     ui.add_space(16.0);
 
     // Selected Day Detail Card
-    render_selected_day_panel(ui, state, t, date_to_open, event_to_open, open_event_dialog);
+    render_selected_day_panel(ui, state, t, date_to_open, event_to_open, open_event_dialog, sync_events_date);
 }
 
 /// Render the detail panel for the currently selected day.
@@ -363,6 +373,7 @@ fn render_selected_day_panel(
     date_to_open: &mut Option<NaiveDate>,
     event_to_open: &mut Option<NoteId>,
     open_event_dialog: &mut bool,
+    sync_events_date: &mut Option<NaiveDate>,
 ) {
     let sel_date = state.selected_daily_date;
     let is_today = sel_date == Local::now().date_naive();
@@ -409,6 +420,19 @@ fn render_selected_day_panel(
                 .clicked()
                 {
                     *open_event_dialog = true;
+                }
+
+                if !day_events.is_empty() {
+                    if theme::ghost_button(
+                        ui,
+                        t,
+                        RichText::new("Sync to Note").color(t.accent_text).strong(),
+                    )
+                    .on_hover_text("Synchronize event links into the daily note body")
+                    .clicked()
+                    {
+                        *sync_events_date = Some(sel_date);
+                    }
                 }
             });
         });

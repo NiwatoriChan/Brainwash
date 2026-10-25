@@ -43,35 +43,91 @@ impl QuickNotes {
         text: &str,
         now: NaiveDateTime,
     ) -> Result<NoteId> {
+        self.capture_full(vault, daily, None, text, false, None, now)
+    }
+
+    /// Stores a quick note with optional title, pinned flag, and Google Keep color.
+    pub fn capture_full(
+        &self,
+        vault: &mut Vault,
+        daily: &DailyNotes,
+        title: Option<&str>,
+        text: &str,
+        pinned: bool,
+        color: Option<&str>,
+        now: NaiveDateTime,
+    ) -> Result<NoteId> {
         let text = text.trim();
-        if text.is_empty() {
+        let clean_title = title.map(str::trim).filter(|t| !t.is_empty());
+        if text.is_empty() && clean_title.is_none() {
             return Err(Error::InvalidName("empty quick note".into()));
         }
 
-        let title = title_from(text);
-        let base = format!("{}/{} {}", self.folder, now.format("%Y-%m-%d %H%M"), title);
+        let effective_title = match clean_title {
+            Some(t) => t.to_string(),
+            None => title_from(text),
+        };
+
+        let base = format!("{}/{} {}", self.folder, now.format("%Y-%m-%d %H%M"), effective_title);
         let id = vault.unique_id(&NoteId::new(&base)?);
 
         let mut fm = Frontmatter::new();
         fm.set("type", KIND)
             .set("created", now.format("%Y-%m-%dT%H:%M").to_string());
-        vault.create(id.clone(), &format!("{}{text}\n", fm.render()))?;
+        if let Some(t) = clean_title {
+            fm.set("title", t);
+        }
+        if pinned {
+            fm.set("pinned", "true");
+        }
+        if let Some(c) = color {
+            if !c.is_empty() {
+                fm.set("color", c);
+            }
+        }
+
+        let content = if clean_title.is_some() {
+            format!("{}# {}\n\n{text}\n", fm.render(), effective_title)
+        } else {
+            format!("{}{text}\n", fm.render())
+        };
+
+        vault.create(id.clone(), &content)?;
 
         if self.log_to_daily {
             let daily_id = daily.open_or_create(vault, now.date())?;
-            let line = format!("- {} [[{}|{}]]", now.format("%H:%M"), id, title);
+            let line = format!("- {} [[{}|{}]]", now.format("%H:%M"), id, effective_title);
             vault.append(&daily_id, &line)?;
         }
         Ok(id)
     }
 
-    /// Most recent quick notes first.
-    pub fn recent<'a>(&self, vault: &'a Vault, limit: usize) -> Vec<&'a Note> {
-        let mut notes: Vec<&Note> = vault.notes().filter(|n| is_quick_note(n)).collect();
+    /// All quick notes from the vault, with pinned notes first, then chronological.
+    pub fn all<'a>(&self, vault: &'a Vault) -> Vec<&'a Note> {
+        let folder = self.folder.trim().trim_matches('/');
+        let mut notes: Vec<&Note> = vault
+            .notes()
+            .filter(|n| {
+                is_quick_note(n)
+                    || n.id.folder() == Some(folder)
+                    || n.id.as_str().starts_with(folder)
+            })
+            .collect();
         notes.sort_by(|a, b| {
+            let pinned_a = a.frontmatter().get("pinned") == Some("true");
+            let pinned_b = b.frontmatter().get("pinned") == Some("true");
+            if pinned_a != pinned_b {
+                return pinned_b.cmp(&pinned_a);
+            }
             let created = |n: &Note| n.frontmatter().get("created").map(str::to_owned);
             created(b).cmp(&created(a))
         });
+        notes
+    }
+
+    /// Most recent quick notes first.
+    pub fn recent<'a>(&self, vault: &'a Vault, limit: usize) -> Vec<&'a Note> {
+        let mut notes = self.all(vault);
         notes.truncate(limit);
         notes
     }

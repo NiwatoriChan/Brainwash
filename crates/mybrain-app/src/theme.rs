@@ -312,7 +312,7 @@ pub fn list_row(
 ) -> Response {
     let height = 26.0;
     let (rect, resp) =
-        ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
+        ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click_and_drag());
 
     if ui.is_rect_visible(rect) {
         let radius = CornerRadius::same(t.radius_sm as u8);
@@ -601,6 +601,143 @@ pub fn icon_pin(ui: &mut Ui, size: f32, color: Color32) -> Response {
         painter.line_segment([right_edge, bottom_tip], Stroke::new(1.2, color));
     }
     resp
+}
+
+/// Clickable pushpin button that never produces tofu.
+pub fn icon_pin_button(ui: &mut Ui, t: &Tokens, is_pinned: bool) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        if resp.hovered() {
+            painter.rect_filled(rect, CornerRadius::same(t.radius_sm as u8), t.hover);
+        }
+        let color = if is_pinned {
+            t.accent_text
+        } else if resp.hovered() {
+            t.text
+        } else {
+            t.text_faint
+        };
+
+        let cx = rect.center().x;
+        let cy = rect.center().y;
+
+        // Pushpin head
+        let head_r = Rect::from_center_size(pos2(cx, cy - 3.5), vec2(7.0, 4.0));
+        painter.rect(
+            head_r,
+            CornerRadius::same(1),
+            if is_pinned { color } else { Color32::TRANSPARENT },
+            Stroke::new(1.3, color),
+            egui::StrokeKind::Inside,
+        );
+        // Base bar
+        painter.line_segment([pos2(cx - 5.0, cy), pos2(cx + 5.0, cy)], Stroke::new(1.4, color));
+        // Pin needle
+        painter.line_segment([pos2(cx, cy), pos2(cx, cy + 5.5)], Stroke::new(1.4, color));
+    }
+    resp.on_hover_cursor(CursorIcon::PointingHand)
+}
+
+/// Clickable palette icon (three color dots) that never produces tofu.
+#[allow(dead_code)]
+pub fn icon_palette_button(ui: &mut Ui, t: &Tokens) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        if resp.hovered() {
+            painter.rect_filled(rect, CornerRadius::same(t.radius_sm as u8), t.hover);
+        }
+        let c = rect.center();
+        painter.circle_filled(c + vec2(-4.0, -2.5), 2.5, Color32::from_rgb(235, 87, 87));
+        painter.circle_filled(c + vec2(4.0, -2.5), 2.5, Color32::from_rgb(242, 201, 76));
+        painter.circle_filled(c + vec2(0.0, 3.5), 2.5, Color32::from_rgb(45, 156, 219));
+    }
+    resp.on_hover_cursor(CursorIcon::PointingHand)
+}
+
+/// Clickable vector trash can icon button.
+pub fn icon_trash_button(ui: &mut Ui, t: &Tokens) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        if resp.hovered() {
+            painter.rect_filled(rect, CornerRadius::same(t.radius_sm as u8), t.hover);
+        }
+        let color = if resp.hovered() { t.danger } else { t.text_faint };
+        let cx = rect.center().x;
+        let cy = rect.center().y;
+
+        // Lid
+        painter.line_segment([pos2(cx - 5.5, cy - 3.5), pos2(cx + 5.5, cy - 3.5)], Stroke::new(1.3, color));
+        painter.line_segment([pos2(cx - 2.0, cy - 5.0), pos2(cx + 2.0, cy - 5.0)], Stroke::new(1.3, color));
+        // Bin body
+        let body = Rect::from_min_max(pos2(cx - 4.5, cy - 2.5), pos2(cx + 4.5, cy + 5.5));
+        painter.rect_stroke(body, CornerRadius::same(1), Stroke::new(1.3, color), egui::StrokeKind::Inside);
+        // Vertical lines inside bin
+        painter.line_segment([pos2(cx - 1.5, cy - 0.5), pos2(cx - 1.5, cy + 3.5)], Stroke::new(1.0, color));
+        painter.line_segment([pos2(cx + 1.5, cy - 0.5), pos2(cx + 1.5, cy + 3.5)], Stroke::new(1.0, color));
+    }
+    resp.on_hover_cursor(CursorIcon::PointingHand)
+}
+
+/// Clickable vector checkbox that never produces tofu.
+pub fn icon_checkbox(ui: &mut Ui, checked: bool, t: &Tokens) -> Response {
+    let size = 15.0;
+    let (rect, resp) = ui.allocate_exact_size(vec2(size, size), Sense::click());
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        let radius = CornerRadius::same(3);
+        let border_color = if checked {
+            t.accent
+        } else if resp.hovered() {
+            t.text
+        } else {
+            t.field_border
+        };
+
+        if checked {
+            painter.rect_filled(rect, radius, t.accent);
+            // Draw checkmark lines
+            let p1 = rect.left_center() + vec2(3.0, 0.0);
+            let p2 = rect.center() + vec2(-1.0, 3.5);
+            let p3 = rect.right_top() + vec2(-3.5, 4.0);
+            painter.line_segment([p1, p2], Stroke::new(1.8, Color32::WHITE));
+            painter.line_segment([p2, p3], Stroke::new(1.8, Color32::WHITE));
+        } else {
+            painter.rect(
+                rect,
+                radius,
+                if resp.hovered() { t.hover } else { t.field },
+                Stroke::new(1.3, border_color),
+                egui::StrokeKind::Inside,
+            );
+        }
+    }
+    resp.on_hover_cursor(CursorIcon::PointingHand)
+}
+
+/// Clickable vector external/open icon button that never produces tofu.
+pub fn icon_open_external_button(ui: &mut Ui, t: &Tokens) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        if resp.hovered() {
+            painter.rect_filled(rect, CornerRadius::same(t.radius_sm as u8), t.hover);
+        }
+        let color = if resp.hovered() { t.text } else { t.text_dim };
+        let cx = rect.center().x;
+        let cy = rect.center().y;
+
+        // Diagonal arrow pointing top-right
+        let p_start = pos2(cx - 3.5, cy + 3.5);
+        let p_end = pos2(cx + 3.5, cy - 3.5);
+        painter.line_segment([p_start, p_end], Stroke::new(1.4, color));
+        // Arrow head
+        painter.line_segment([p_end, pos2(cx + 0.5, cy - 3.5)], Stroke::new(1.4, color));
+        painter.line_segment([p_end, pos2(cx + 3.5, cy - 0.5)], Stroke::new(1.4, color));
+    }
+    resp.on_hover_cursor(CursorIcon::PointingHand)
 }
 
 /// Install font fallback stack to prevent missing glyph tofu.

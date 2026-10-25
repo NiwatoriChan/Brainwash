@@ -32,12 +32,22 @@ pub enum SidebarSection {
     Notes,
     Daily,
     Events,
+    Quick,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DailyViewMode {
     MonthGrid,
+    Agenda,
     Timeline,
+}
+
+/// Payload stored in egui drag-and-drop when dragging a note or canvas from the sidebar.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DraggedNote {
+    pub id: String,
+    pub name: String,
+    pub is_canvas: bool,
 }
 
 pub struct AppState {
@@ -99,6 +109,20 @@ pub struct AppState {
 
     pub show_quick_capture: bool,
     pub quick_capture_buffer: String,
+
+    // Quick Notes (Google Keep mode)
+    pub quick_composer_title: String,
+    pub quick_composer_expanded: bool,
+    pub quick_composer_pinned: bool,
+    pub quick_composer_color: Option<String>,
+    pub quick_search_query: String,
+
+    // In-place Keep note edit dialog
+    pub quick_edit_note: Option<NoteId>,
+    pub quick_edit_title: String,
+    pub quick_edit_body: String,
+    pub quick_edit_pinned: bool,
+    pub quick_edit_color: Option<String>,
 
     pub show_new_note_dialog: bool,
     pub new_note_name: String,
@@ -206,6 +230,16 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
             command_palette_selected: 0,
             show_quick_capture: false,
             quick_capture_buffer: String::new(),
+            quick_composer_title: String::new(),
+            quick_composer_expanded: false,
+            quick_composer_pinned: false,
+            quick_composer_color: None,
+            quick_search_query: String::new(),
+            quick_edit_note: None,
+            quick_edit_title: String::new(),
+            quick_edit_body: String::new(),
+            quick_edit_pinned: false,
+            quick_edit_color: None,
             show_new_note_dialog: false,
             new_note_name: String::new(),
             show_new_event_dialog: false,
@@ -254,6 +288,8 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
 
     pub fn open_note(&mut self, id: NoteId) {
         if self.active_note.as_ref() == Some(&id) {
+            self.top_mode = TopBarMode::Notes;
+            self.sidebar_section = SidebarSection::Notes;
             return;
         }
         self.save_current();
@@ -278,6 +314,12 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
         if let Some(target_id) = self.vault.resolve_link(raw_target) {
             self.open_note(target_id.clone());
         } else if let Ok(new_id) = NoteId::new(raw_target) {
+            if let Some(folder) = new_id.folder() {
+                if self.is_reserved_special_folder(folder) {
+                    self.set_status("Cannot create normal notes in Daily or Quick Notes folders.");
+                    return;
+                }
+            }
             let title = new_id.name();
             let template = format!("# {title}\n\n");
             match self.vault.create(new_id.clone(), &template) {
@@ -329,6 +371,19 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
         }
     }
 
+    pub fn is_reserved_special_folder(&self, folder: &str) -> bool {
+        let clean = folder.trim().trim_matches('/');
+        let daily = self.daily_config.folder.trim().trim_matches('/');
+        let quick = self.quick_config.folder.trim().trim_matches('/');
+
+        clean.eq_ignore_ascii_case(daily)
+            || clean.to_lowercase().starts_with(&format!("{}/", daily.to_lowercase()))
+            || clean.eq_ignore_ascii_case(quick)
+            || clean.to_lowercase().starts_with(&format!("{}/", quick.to_lowercase()))
+            || clean.eq_ignore_ascii_case("quick")
+            || clean.to_lowercase().starts_with("quick/")
+    }
+
     pub fn create_note(&mut self, name: &str) {
         let name = name.trim();
         if name.is_empty() {
@@ -336,6 +391,12 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
         }
         match NoteId::new(name) {
             Ok(id) => {
+                if let Some(folder) = id.folder() {
+                    if self.is_reserved_special_folder(folder) {
+                        self.set_status("Cannot add normal notes in Daily or Quick Notes folders.");
+                        return;
+                    }
+                }
                 let initial = format!("# {}\n\n", id.name());
                 match self.vault.create(id.clone(), &initial) {
                     Ok(_) => {
@@ -377,7 +438,6 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
                 self.link_index = LinkIndex::build(&self.vault);
                 self.open_note(id);
                 self.top_mode = TopBarMode::Notes;
-                self.sidebar_section = SidebarSection::Daily;
                 self.set_status(format!("Opened daily note for {}", today));
             }
             Err(e) => self.set_status(format!("Failed to open daily note: {e}")),
@@ -391,7 +451,7 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
                 self.link_index = LinkIndex::build(&self.vault);
                 self.open_note(id);
                 self.top_mode = TopBarMode::Notes;
-                self.sidebar_section = SidebarSection::Daily;
+                self.set_status(format!("Opened daily note for {}", date));
             }
             Err(e) => self.set_status(format!("Failed to open daily note: {e}")),
         }
@@ -408,6 +468,7 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
         }
     }
 
+    #[allow(dead_code)]
     pub fn capture_quick_note(&mut self) {
         let text = self.quick_capture_buffer.trim().to_string();
         if text.is_empty() {
@@ -426,17 +487,209 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
         }
     }
 
-    pub fn create_event(&mut self) {
-        match self.event_store.create(&mut self.vault, &self.new_event_draft) {
+    pub fn capture_quick_keep(&mut self) {
+        let title = self.quick_composer_title.trim();
+        let text = self.quick_capture_buffer.trim();
+        if title.is_empty() && text.is_empty() {
+            return;
+        }
+        let now = Local::now().naive_local();
+        let title_opt = if title.is_empty() { None } else { Some(title) };
+        let color_opt = self.quick_composer_color.as_deref();
+        let pinned = self.quick_composer_pinned;
+
+        match self.quick_config.capture_full(
+            &mut self.vault,
+            &self.daily_config,
+            title_opt,
+            text,
+            pinned,
+            color_opt,
+            now,
+        ) {
             Ok(id) => {
                 self.link_index = LinkIndex::build(&self.vault);
+                self.quick_composer_title.clear();
+                self.quick_capture_buffer.clear();
+                self.quick_composer_pinned = false;
+                self.quick_composer_color = None;
+                self.quick_composer_expanded = false;
+                self.show_quick_capture = false;
+                self.set_status("Quick note saved!");
+                let _ = id;
+            }
+            Err(e) => self.set_status(format!("Failed quick capture: {e}")),
+        }
+    }
+
+    pub fn open_quick_edit(&mut self, id: NoteId) {
+        if let Some(note) = self.vault.get(&id) {
+            let fm = note.frontmatter();
+            let title = fm.get("title").map(|s| s.to_string()).unwrap_or_else(|| note.title().to_string());
+            let pinned = fm.get("pinned") == Some("true");
+            let color = fm.get("color").map(|s| s.to_string());
+            let raw_body = note.body();
+            let body = raw_body
+                .trim_start_matches(|c: char| c == '#' || c.is_whitespace() || c == '\n')
+                .to_string();
+
+            self.quick_edit_note = Some(id);
+            self.quick_edit_title = title;
+            self.quick_edit_body = body;
+            self.quick_edit_pinned = pinned;
+            self.quick_edit_color = color;
+        }
+    }
+
+    pub fn save_quick_edit(&mut self) {
+        if let Some(id) = self.quick_edit_note.take() {
+            if let Some(note) = self.vault.get(&id) {
+                let mut fm = note.frontmatter().clone();
+                let clean_title = self.quick_edit_title.trim();
+                if !clean_title.is_empty() {
+                    fm.set("title", clean_title);
+                }
+                if self.quick_edit_pinned {
+                    fm.set("pinned", "true");
+                } else {
+                    fm.remove("pinned");
+                }
+                if let Some(c) = &self.quick_edit_color {
+                    if !c.is_empty() {
+                        fm.set("color", c);
+                    } else {
+                        fm.remove("color");
+                    }
+                } else {
+                    fm.remove("color");
+                }
+
+                let new_content = if !clean_title.is_empty() {
+                    format!("{}# {}\n\n{}\n", fm.render(), clean_title, self.quick_edit_body.trim())
+                } else {
+                    format!("{}{}\n", fm.render(), self.quick_edit_body.trim())
+                };
+
+                if let Err(e) = self.vault.save(&id, &new_content) {
+                    self.set_status(format!("Error saving quick note: {e}"));
+                } else {
+                    self.link_index = LinkIndex::build(&self.vault);
+                    self.set_status("Quick note updated");
+                }
+            }
+        }
+    }
+
+    pub fn toggle_quick_pinned(&mut self, id: &NoteId) {
+        if let Some(note) = self.vault.get(id) {
+            let mut fm = note.frontmatter().clone();
+            let is_pinned = fm.get("pinned") == Some("true");
+            if is_pinned {
+                fm.remove("pinned");
+            } else {
+                fm.set("pinned", "true");
+            }
+            let new_content = format!("{}{}", fm.render(), note.body());
+            let _ = self.vault.save(id, &new_content);
+        }
+    }
+
+    pub fn set_quick_color(&mut self, id: &NoteId, color: Option<&str>) {
+        if let Some(note) = self.vault.get(id) {
+            let mut fm = note.frontmatter().clone();
+            if let Some(c) = color {
+                fm.set("color", c);
+            } else {
+                fm.remove("color");
+            }
+            let new_content = format!("{}{}", fm.render(), note.body());
+            let _ = self.vault.save(id, &new_content);
+        }
+    }
+
+    pub fn delete_quick_note(&mut self, id: &NoteId) {
+        if let Err(e) = self.vault.delete(id) {
+            self.set_status(format!("Error deleting quick note: {e}"));
+        } else {
+            self.link_index = LinkIndex::build(&self.vault);
+            if self.active_note.as_ref() == Some(id) {
+                self.active_note = None;
+                self.editor_buffer.clear();
+            }
+            self.set_status("Quick note deleted");
+        }
+    }
+
+    pub fn create_event(&mut self) {
+        let draft = self.new_event_draft.clone();
+        match self.event_store.create(&mut self.vault, &draft) {
+            Ok(id) => {
+                // Integrate directly into the daily note for that event's date
+                let time_str = match (draft.start, draft.end) {
+                    (Some(s), Some(e)) => format!("{} – {}", s.format("%H:%M"), e.format("%H:%M")),
+                    (Some(s), None) => s.format("%H:%M").to_string(),
+                    (None, _) => "All day".to_string(),
+                };
+                let event_bullet = format!("- [ ] **{}** [[{}]]\n", time_str, id.name());
+                if let Ok(daily_id) = self.daily_config.open_or_create(&mut self.vault, draft.date) {
+                    if let Some(daily_note) = self.vault.get(&daily_id) {
+                        if !daily_note.content.contains(&id.name()) {
+                            let _ = self.vault.append(&daily_id, &event_bullet);
+                        }
+                    }
+                }
+
+                self.link_index = LinkIndex::build(&self.vault);
                 self.show_new_event_dialog = false;
-                self.set_status("Event created!");
+                self.set_status("Event created and integrated into daily note!");
                 self.open_note(id);
                 self.top_mode = TopBarMode::Notes;
-                self.sidebar_section = SidebarSection::Events;
+                self.sidebar_section = SidebarSection::Notes;
             }
             Err(e) => self.set_status(format!("Invalid event: {e}")),
+        }
+    }
+
+    /// Appends or synchronizes scheduled events for `date` into that day's daily note.
+    pub fn sync_events_to_daily_note(&mut self, date: NaiveDate) {
+        let events = self.event_store.on(&self.vault, date);
+        if events.is_empty() {
+            self.set_status("No events scheduled for this date.");
+            return;
+        }
+
+        let daily_id = match self.daily_config.open_or_create(&mut self.vault, date) {
+            Ok(id) => id,
+            Err(e) => {
+                self.set_status(format!("Failed to open daily note: {e}"));
+                return;
+            }
+        };
+
+        if let Some(daily_note) = self.vault.get(&daily_id) {
+            let mut content = daily_note.content.clone();
+            let mut added = 0;
+            for ev in events {
+                if !content.contains(&ev.id.name()) {
+                    let bullet = format!("- [ ] **{}** [[{}]]\n", ev.time_label(), ev.id.name());
+                    if !content.ends_with('\n') && !content.is_empty() {
+                        content.push('\n');
+                    }
+                    content.push_str(&bullet);
+                    added += 1;
+                }
+            }
+            if added > 0 {
+                let _ = self.vault.save(&daily_id, &content);
+                self.link_index = LinkIndex::build(&self.vault);
+                if self.active_note.as_ref() == Some(&daily_id) {
+                    self.editor_buffer = content;
+                    self.editor_dirty = false;
+                }
+                self.set_status(format!("Synced {added} event(s) to daily note"));
+            } else {
+                self.set_status("All events for this day are already listed in the note");
+            }
         }
     }
 
@@ -513,10 +766,18 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
         if clean.is_empty() {
             return Err(mybrain_core::Error::InvalidName("Folder name cannot be empty".into()));
         }
+        if let Some(p) = parent {
+            if self.is_reserved_special_folder(p) {
+                return Err(mybrain_core::Error::InvalidName("Cannot create subfolders inside Daily or Quick Notes".into()));
+            }
+        }
         let rel = match parent {
             Some(p) if !p.is_empty() => format!("{p}/{clean}"),
             _ => clean.to_owned(),
         };
+        if self.is_reserved_special_folder(&rel) {
+            return Err(mybrain_core::Error::InvalidName("Cannot create folder with reserved name (Daily, Quick Notes)".into()));
+        }
         self.vault.create_folder(&rel)?;
         self.set_status(format!("Created folder: {rel}"));
         Ok(())
@@ -531,5 +792,77 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
         if let Some(d) = NaiveDate::from_ymd_opt(new_year, new_month, 1) {
             self.calendar_view_date = d;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_app_state() -> (tempfile::TempDir, AppState) {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = AppState::new(tmp.path().to_path_buf()).unwrap();
+        (tmp, state)
+    }
+
+    #[test]
+    fn test_is_reserved_special_folder() {
+        let (_tmp, state) = temp_app_state();
+        assert!(state.is_reserved_special_folder("Daily"));
+        assert!(state.is_reserved_special_folder("daily"));
+        assert!(state.is_reserved_special_folder("Daily/2026"));
+        assert!(state.is_reserved_special_folder("Quick Notes"));
+        assert!(state.is_reserved_special_folder("quick notes"));
+        assert!(state.is_reserved_special_folder("Quick Notes/Archive"));
+        assert!(state.is_reserved_special_folder("quick"));
+        assert!(state.is_reserved_special_folder("quick/foo"));
+
+        assert!(!state.is_reserved_special_folder("Projects"));
+        assert!(!state.is_reserved_special_folder("Work/DailyTasks"));
+        assert!(!state.is_reserved_special_folder("Notes"));
+    }
+
+    #[test]
+    fn test_cannot_create_normal_notes_in_reserved_folders() {
+        let (_tmp, mut state) = temp_app_state();
+        state.create_note("Daily/MyNote");
+        assert!(state.vault.get(&NoteId::new("Daily/MyNote").unwrap()).is_none());
+        assert!(state.active_status().unwrap().contains("Cannot add normal notes"));
+
+        state.create_note("Quick Notes/Test");
+        assert!(state.vault.get(&NoteId::new("Quick Notes/Test").unwrap()).is_none());
+        assert!(state.active_status().unwrap().contains("Cannot add normal notes"));
+
+        // But normal notes work
+        state.create_note("Projects/MyNote");
+        assert!(state.vault.get(&NoteId::new("Projects/MyNote").unwrap()).is_some());
+    }
+
+    #[test]
+    fn test_cannot_create_folders_in_reserved_folders() {
+        let (_tmp, mut state) = temp_app_state();
+        assert!(state.create_folder(Some("Daily"), "Sub").is_err());
+        assert!(state.create_folder(None, "Daily").is_err());
+        assert!(state.create_folder(None, "Quick Notes").is_err());
+
+        assert!(state.create_folder(None, "Projects").is_ok());
+        assert!(state.create_folder(Some("Projects"), "Sub").is_ok());
+    }
+
+    #[test]
+    fn test_open_note_switches_to_text_editor() {
+        let (_tmp, mut state) = temp_app_state();
+        state.create_note("TestNote");
+        let id = NoteId::new("TestNote").unwrap();
+
+        // Switch to daily section and canvas top mode
+        state.sidebar_section = SidebarSection::Daily;
+        state.top_mode = TopBarMode::Canvas;
+
+        // Calling open_note even if active switches to Notes text editor
+        state.open_note(id.clone());
+        assert_eq!(state.sidebar_section, SidebarSection::Notes);
+        assert_eq!(state.top_mode, TopBarMode::Notes);
+        assert_eq!(state.active_note.as_ref(), Some(&id));
     }
 }

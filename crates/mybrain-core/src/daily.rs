@@ -63,7 +63,17 @@ impl DailyNotes {
 
     /// Expands the template for `date`.
     pub fn render_template(&self, date: NaiveDate) -> String {
-        expand_placeholders(&self.template, date, &date.format(&self.date_format).to_string())
+        self.render_template_with_events(date, None)
+    }
+
+    /// Expands the template for `date` with an optional pre-formatted events list.
+    pub fn render_template_with_events(&self, date: NaiveDate, events_text: Option<&str>) -> String {
+        expand_placeholders(
+            &self.template,
+            date,
+            &date.format(&self.date_format).to_string(),
+            events_text,
+        )
     }
 
     /// Returns the id of the daily note for `date`, creating it from the
@@ -92,7 +102,12 @@ pub fn today() -> NaiveDate {
     Local::now().date_naive()
 }
 
-fn expand_placeholders(template: &str, date: NaiveDate, title: &str) -> String {
+fn expand_placeholders(
+    template: &str,
+    date: NaiveDate,
+    title: &str,
+    events_text: Option<&str>,
+) -> String {
     let mut out = String::with_capacity(template.len());
     let mut rest = template;
     while let Some(start) = rest.find("{{") {
@@ -106,6 +121,11 @@ fn expand_placeholders(template: &str, date: NaiveDate, title: &str) -> String {
         match tag {
             "date" => out.push_str(&date.format("%Y-%m-%d").to_string()),
             "title" => out.push_str(title),
+            "events" => {
+                if let Some(evs) = events_text {
+                    out.push_str(evs);
+                }
+            }
             _ => match tag.strip_prefix("date:") {
                 Some(fmt) => out.push_str(&date.format(fmt.trim()).to_string()),
                 None => out.push_str(&rest[start..start + 2 + end + 2]),
@@ -143,6 +163,19 @@ mod tests {
         assert_eq!(
             daily.render_template(date()),
             "2026-10-24 | 24/10 | 2026-10-24 | {{unknown}}"
+        );
+
+        let daily_events = DailyNotes {
+            template: "Date: {{date}}\nEvents:\n{{events}}".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            daily_events.render_template_with_events(date(), Some("- 14:00 [[Meeting]]")),
+            "Date: 2026-10-24\nEvents:\n- 14:00 [[Meeting]]"
+        );
+        assert_eq!(
+            daily_events.render_template(date()),
+            "Date: 2026-10-24\nEvents:\n"
         );
     }
 

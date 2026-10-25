@@ -37,9 +37,11 @@ impl BrainwashApp {
             if i.modifiers.command && (i.key_pressed(egui::Key::P) || i.key_pressed(egui::Key::O)) {
                 self.state.show_command_palette = !self.state.show_command_palette;
             }
-            // Ctrl+Q: Quick Capture
+            // Ctrl+Q: Quick Capture / Keep view
             if i.modifiers.command && i.key_pressed(egui::Key::Q) {
-                self.state.show_quick_capture = !self.state.show_quick_capture;
+                self.state.sidebar_section = SidebarSection::Quick;
+                self.state.top_mode = TopBarMode::Notes;
+                self.state.quick_composer_expanded = true;
             }
             // Ctrl+N: New Note
             if i.modifiers.command && i.key_pressed(egui::Key::N) {
@@ -214,7 +216,10 @@ impl BrainwashApp {
                                 ui.close();
                             }
                             if menu_item(ui, t, "Event", "") {
-                                self.state.new_event_draft.date = chrono::Local::now().date_naive();
+                                let target_date = self.state.active_note.as_ref()
+                                    .and_then(|id| self.state.daily_config.date_of(id))
+                                    .unwrap_or(self.state.selected_daily_date);
+                                self.state.new_event_draft = mybrain_core::EventDraft::new(target_date);
                                 self.state.show_new_event_dialog = true;
                                 ui.close();
                             }
@@ -227,8 +232,10 @@ impl BrainwashApp {
                                 ui.close();
                             }
                             ui.separator();
-                            if menu_item(ui, t, "Quick capture", "Ctrl Q") {
-                                self.state.show_quick_capture = true;
+                            if menu_item(ui, t, "Quick notes", "Ctrl Q") {
+                                self.state.sidebar_section = SidebarSection::Quick;
+                                self.state.top_mode = TopBarMode::Notes;
+                                self.state.quick_composer_expanded = true;
                                 ui.close();
                             }
                             if menu_item(ui, t, "Today's daily note", "") {
@@ -370,11 +377,11 @@ impl eframe::App for BrainwashApp {
                             SidebarSection::Notes => {
                                 views::editor::show(ui, &mut self.state);
                             }
-                            SidebarSection::Daily => {
+                            SidebarSection::Daily | SidebarSection::Events => {
                                 views::daily_view::show(ui, &mut self.state);
                             }
-                            SidebarSection::Events => {
-                                views::events_view::show(ui, &mut self.state);
+                            SidebarSection::Quick => {
+                                views::quick_capture::show_keep_view(ui, &mut self.state);
                             }
                         }
                     }
@@ -384,12 +391,50 @@ impl eframe::App for BrainwashApp {
         // Modals & Floating Dialogs
         views::command_palette::show(&ctx, &mut self.state);
         views::quick_capture::show(&ctx, &mut self.state);
+        views::quick_capture::show_keep_edit_dialog(&ctx, &mut self.state);
         views::dialogs::show_new_note(&ctx, &mut self.state);
         views::dialogs::show_new_event(&ctx, &mut self.state);
         views::dialogs::show_new_folder(&ctx, &mut self.state);
         views::dialogs::show_new_canvas(&ctx, &mut self.state);
         views::settings_dialog::show(&ctx, &mut self.state);
         views::vault_switcher::show(&ctx, &mut self.state);
+
+        // Drag-and-drop preview tooltip & unconsumed cleanup
+        if let Some(dragged) = egui::DragAndDrop::payload::<crate::state::DraggedNote>(&ctx) {
+            if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
+                egui::Area::new(egui::Id::unique("drag_preview_area"))
+                    .fixed_pos(pos + egui::vec2(16.0, 16.0))
+                    .order(egui::Order::Tooltip)
+                    .interactable(false)
+                    .show(&ctx, |ui| {
+                        Frame::NONE
+                            .fill(tokens.card)
+                            .stroke(Stroke::new(1.0, tokens.accent))
+                            .corner_radius(CornerRadius::same(tokens.radius_sm as u8))
+                            .inner_margin(Margin::symmetric(10, 6))
+                            .shadow(egui::Shadow {
+                                offset: [0, 4],
+                                blur: 12,
+                                spread: 0,
+                                color: tokens.shadow,
+                            })
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new("🔗").size(12.0));
+                                    ui.label(
+                                        RichText::new(format!("[[{}]]", dragged.name))
+                                            .strong()
+                                            .size(12.0)
+                                            .color(tokens.text),
+                                    );
+                                });
+                            });
+                    });
+            }
+        }
+        if ctx.input(|i| i.pointer.any_released()) {
+            let _ = egui::DragAndDrop::take_payload::<crate::state::DraggedNote>(&ctx);
+        }
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {

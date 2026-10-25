@@ -64,6 +64,11 @@ impl Frontmatter {
         self
     }
 
+    pub fn remove(&mut self, key: &str) -> &mut Self {
+        self.entries.remove(key);
+        self
+    }
+
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }

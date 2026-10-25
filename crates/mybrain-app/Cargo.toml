@@ -21,5 +21,8 @@ log.workspace = true
 env_logger.workspace = true
 dirs.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true

@@ -56,10 +56,36 @@ pub fn show_new_note(ctx: &egui::Context, state: &mut AppState) {
             submitted = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         });
 
+        let typed_name = state.new_note_name.trim();
+        let target_folder = match &state.new_note_folder {
+            Some(f) if !f.is_empty() && !typed_name.contains('/') => Some(f.clone()),
+            _ => {
+                if let Some(slash_idx) = typed_name.rfind('/') {
+                    Some(typed_name[..slash_idx].to_string())
+                } else {
+                    None
+                }
+            }
+        };
+
+        let is_reserved = target_folder
+            .as_ref()
+            .map(|f| state.is_reserved_special_folder(f))
+            .unwrap_or(false);
+
+        if is_reserved {
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new("⚠️ Normal notes cannot be added in Daily or Quick Notes folders.")
+                    .color(t.warning)
+                    .size(11.5),
+            );
+        }
+
         ui.add_space(14.0);
 
         ui.horizontal(|ui| {
-            let can_create = !state.new_note_name.trim().is_empty();
+            let can_create = !is_reserved && !typed_name.is_empty();
             if ui.add_enabled(
                 can_create,
                 egui::Button::new(RichText::new("Create Note").color(Color32::WHITE).strong())
@@ -295,16 +321,34 @@ pub fn show_new_folder(ctx: &egui::Context, state: &mut AppState) {
             }
         });
 
+        let typed_folder = state.new_folder_name.trim();
+        let is_reserved_parent = state
+            .new_folder_parent
+            .as_deref()
+            .map(|p| state.is_reserved_special_folder(p))
+            .unwrap_or(false);
+        let is_reserved_name = !typed_folder.is_empty() && state.is_reserved_special_folder(typed_folder);
+        let is_blocked = is_reserved_parent || is_reserved_name;
+
+        if is_blocked {
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new("⚠️ Cannot create folder inside or with reserved name (Daily, Quick Notes).")
+                    .color(t.warning)
+                    .size(11.5),
+            );
+        }
+
         ui.add_space(12.0);
         ui.horizontal(|ui| {
-            let can_create = !state.new_folder_name.trim().is_empty();
+            let can_create = !is_blocked && !typed_folder.is_empty();
             if ui.add_enabled(
                 can_create,
                 egui::Button::new(RichText::new("Create Folder").color(Color32::WHITE).strong())
                     .fill(t.accent)
                     .stroke(Stroke::NONE)
                     .corner_radius(CornerRadius::same(t.radius_sm as u8)),
-            ).clicked() {
+            ).clicked() || (should_create && can_create) {
                 should_create = true;
                 should_close = true;
             }
