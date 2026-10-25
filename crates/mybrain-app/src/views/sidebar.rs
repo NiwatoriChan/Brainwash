@@ -764,8 +764,18 @@ fn render_quick_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
 
                     let trail = if is_pinned { Some("Pinned") } else { None };
                     let selected = state.quick_edit_note.as_ref() == Some(&note.id);
-
-                    if theme::list_row(ui, t, selected, Some(dot_color), &title, trail).clicked() {
+                    let resp = theme::list_row(ui, t, selected, Some(dot_color), &title, trail);
+                    if resp.drag_started() {
+                        egui::DragAndDrop::set_payload(
+                            ui.ctx(),
+                            crate::state::DraggedNote {
+                                id: note.id.as_str().to_string(),
+                                name: note.id.name().to_string(),
+                                is_canvas: false,
+                            },
+                        );
+                    }
+                    if resp.clicked() {
                         to_edit = Some(note.id.clone());
                     }
                 }

@@ -2,6 +2,7 @@
 
 use chrono::Local;
 use egui::{Color32, Frame, Margin, RichText, ScrollArea, Ui};
+use mybrain_core::events::EventDraft;
 
 use crate::state::AppState;
 use crate::theme::{self, Tokens};
@@ -34,7 +35,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                                     .stroke(egui::Stroke::NONE)
                                     .corner_radius(egui::CornerRadius::same(t.radius_sm as u8)),
                             ).clicked() {
-                                state.new_event_draft.date = Local::now().date_naive();
+                                state.new_event_draft = EventDraft::new(state.selected_daily_date);
                                 state.show_new_event_dialog = true;
                             }
                         });
@@ -84,7 +85,22 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                                         } else {
                                             t.text
                                         };
-                                        ui.label(RichText::new(event.date.format("%a, %b %-d").to_string()).strong().size(13.0).color(date_color));
+                                        if ui
+                                            .add(
+                                                egui::Label::new(
+                                                    RichText::new(event.date.format("%a, %b %-d").to_string())
+                                                        .strong()
+                                                        .size(13.0)
+                                                        .color(date_color),
+                                                )
+                                                .sense(egui::Sense::click()),
+                                            )
+                                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                            .on_hover_text("Open Daily Note")
+                                            .clicked()
+                                        {
+                                            state.open_daily_date(event.date);
+                                        }
                                         theme::pill(ui, &event.time_label(), t.warning, t.accent_soft);
                                     },
                                 );
