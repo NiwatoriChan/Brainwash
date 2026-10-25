@@ -51,11 +51,25 @@ impl BrainwashApp {
             if i.modifiers.command && (i.key_pressed(egui::Key::B) || i.key_pressed(egui::Key::Backslash)) {
                 self.state.show_sidebar = !self.state.show_sidebar;
             }
+            // Ctrl+1: Notes, Ctrl+2: Calendar, Ctrl+3: Graph, Ctrl+4: Canvas
+            if i.modifiers.command && i.key_pressed(egui::Key::Num1) {
+                self.state.top_mode = TopBarMode::Notes;
+            }
+            if i.modifiers.command && i.key_pressed(egui::Key::Num2) {
+                self.state.top_mode = TopBarMode::Calendar;
+            }
+            if i.modifiers.command && i.key_pressed(egui::Key::Num3) {
+                self.state.top_mode = TopBarMode::Graph;
+            }
+            if i.modifiers.command && i.key_pressed(egui::Key::Num4) {
+                self.state.top_mode = TopBarMode::Canvas;
+            }
             // Ctrl+G: Toggle Notes / Graph modes
             if i.modifiers.command && i.key_pressed(egui::Key::G) {
                 self.state.top_mode = match self.state.top_mode {
                     TopBarMode::Notes => TopBarMode::Graph,
                     TopBarMode::Graph => TopBarMode::Notes,
+                    TopBarMode::Calendar => TopBarMode::Notes,
                     TopBarMode::Canvas => TopBarMode::Notes,
                 };
             }
@@ -126,17 +140,8 @@ impl BrainwashApp {
 
                     ui.add_space(10.0);
 
-                    // Top Mode Switcher: Notes vs Graph
-                    let top_mode = self.state.top_mode;
-                    if let Some(sel) = theme::segmented(
-                        ui,
-                        t,
-                        top_mode,
-                        &[
-                            (TopBarMode::Notes, "Notes"),
-                            (TopBarMode::Graph, "Graph"),
-                        ],
-                    ) {
+                    // Top Mode Icon Switcher: Notes (Pencil), Calendar, Graph, Canvas
+                    if let Some(sel) = theme::top_mode_segmented(ui, t, self.state.top_mode) {
                         self.state.top_mode = sel;
                     }
 
@@ -273,6 +278,10 @@ impl BrainwashApp {
                     } else if self.state.top_mode == TopBarMode::Graph {
                         ui.label(small("·".into(), t.text_faint));
                         ui.label(small(format!("{} connections", self.state.graph.edges.len()), t.text_faint));
+                    } else if self.state.top_mode == TopBarMode::Calendar {
+                        let events_count = self.state.event_store.on(&self.state.vault, self.state.selected_daily_date).len();
+                        ui.label(small("·".into(), t.text_faint));
+                        ui.label(small(format!("Calendar — {events_count} event{} on {}", if events_count == 1 { "" } else { "s" }, self.state.selected_daily_date.format("%b %-d")), t.text_faint));
                     }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -366,6 +375,9 @@ impl eframe::App for BrainwashApp {
             )
             .show(ui, |ui| {
                 match self.state.top_mode {
+                    TopBarMode::Calendar => {
+                        views::daily_view::show(ui, &mut self.state);
+                    }
                     TopBarMode::Graph => {
                         views::graph_view::show(ui, &mut self.state);
                     }
@@ -399,6 +411,8 @@ impl eframe::App for BrainwashApp {
         views::dialogs::show_new_event(&ctx, &mut self.state);
         views::dialogs::show_new_folder(&ctx, &mut self.state);
         views::dialogs::show_new_canvas(&ctx, &mut self.state);
+        views::dialogs::show_insert_table(&ctx, &mut self.state);
+        views::dialogs::show_insert_image(&ctx, &mut self.state);
         views::settings_dialog::show(&ctx, &mut self.state);
         views::vault_switcher::show(&ctx, &mut self.state);
 

@@ -624,6 +624,167 @@ pub fn icon_image(ui: &mut Ui, size: f32, color: Color32) -> Response {
     resp
 }
 
+/// Paint a crisp vector pencil icon for Notes mode.
+pub fn paint_pencil_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let center = rect.center();
+    let tip = pos2(center.x - 5.5, center.y + 5.5);
+    let p_left = pos2(center.x - 2.5, center.y + 5.5);
+    let p_right = pos2(center.x - 5.5, center.y + 2.5);
+    let top_left = pos2(center.x + 3.0, center.y - 0.0);
+    let top_right = pos2(center.x - 0.0, center.y - 3.0);
+    let eraser_top_left = pos2(center.x + 5.0, center.y - 2.0);
+    let eraser_top_right = pos2(center.x + 2.0, center.y - 5.0);
+
+    let stroke = Stroke::new(1.3, color);
+    // Shaft
+    painter.line_segment([p_left, top_left], stroke);
+    painter.line_segment([p_right, top_right], stroke);
+    painter.line_segment([top_left, top_right], stroke);
+    // Tip
+    painter.line_segment([p_left, tip], stroke);
+    painter.line_segment([p_right, tip], stroke);
+    painter.circle_filled(tip + vec2(0.9, -0.9), 1.0, color);
+    // Eraser
+    painter.line_segment([top_left, eraser_top_left], stroke);
+    painter.line_segment([top_right, eraser_top_right], stroke);
+    painter.line_segment([eraser_top_left, eraser_top_right], stroke);
+}
+
+/// Paint a crisp vector calendar icon for Calendar mode.
+pub fn paint_calendar_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let center = rect.center();
+    let box_rect = Rect::from_center_size(center + vec2(0.0, 1.0), vec2(14.0, 12.0));
+    painter.rect_stroke(box_rect, CornerRadius::same(2), Stroke::new(1.3, color), egui::StrokeKind::Inside);
+
+    let bar_y = box_rect.top() + 3.5;
+    painter.line_segment([pos2(box_rect.left(), bar_y), pos2(box_rect.right(), bar_y)], Stroke::new(1.1, color));
+
+    // Top binder rings
+    painter.line_segment(
+        [pos2(box_rect.left() + 3.5, box_rect.top() - 2.0), pos2(box_rect.left() + 3.5, box_rect.top() + 1.5)],
+        Stroke::new(1.4, color),
+    );
+    painter.line_segment(
+        [pos2(box_rect.right() - 3.5, box_rect.top() - 2.0), pos2(box_rect.right() - 3.5, box_rect.top() + 1.5)],
+        Stroke::new(1.4, color),
+    );
+
+    // Days grid dots
+    painter.circle_filled(pos2(box_rect.left() + 3.5, bar_y + 3.0), 0.9, color);
+    painter.circle_filled(pos2(box_rect.center().x, bar_y + 3.0), 0.9, color);
+    painter.circle_filled(pos2(box_rect.right() - 3.5, bar_y + 3.0), 0.9, color);
+    painter.circle_filled(pos2(box_rect.left() + 3.5, bar_y + 6.0), 0.9, color);
+    painter.circle_filled(pos2(box_rect.center().x, bar_y + 6.0), 0.9, color);
+    painter.circle_filled(pos2(box_rect.right() - 3.5, bar_y + 6.0), 0.9, color);
+}
+
+/// Paint a crisp vector graph constellation/network icon for Graph mode.
+pub fn paint_graph_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let center = rect.center();
+    let n_center = center;
+    let n1 = pos2(center.x - 5.0, center.y - 4.5);
+    let n2 = pos2(center.x + 5.0, center.y - 3.5);
+    let n3 = pos2(center.x - 4.5, center.y + 4.5);
+    let n4 = pos2(center.x + 4.5, center.y + 4.0);
+
+    let edge_stroke = Stroke::new(1.1, color);
+    let sub_stroke = Stroke::new(0.8, color.gamma_multiply(0.6));
+
+    // Outer interconnects
+    painter.line_segment([n1, n2], sub_stroke);
+    painter.line_segment([n3, n4], sub_stroke);
+
+    // Hub edges
+    painter.line_segment([n_center, n1], edge_stroke);
+    painter.line_segment([n_center, n2], edge_stroke);
+    painter.line_segment([n_center, n3], edge_stroke);
+    painter.line_segment([n_center, n4], edge_stroke);
+
+    // Node circles
+    painter.circle_filled(n_center, 2.2, color);
+    painter.circle_filled(n1, 1.8, color);
+    painter.circle_filled(n2, 1.8, color);
+    painter.circle_filled(n3, 1.8, color);
+    painter.circle_filled(n4, 1.8, color);
+}
+
+/// Paint a clean vector canvas icon.
+pub fn paint_canvas_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let center = rect.center();
+    let box_rect = Rect::from_center_size(center, vec2(14.0, 12.0));
+    painter.rect_stroke(box_rect, CornerRadius::same(2), Stroke::new(1.2, color), egui::StrokeKind::Inside);
+    let p_top = pos2(center.x, center.y - 3.5);
+    let p_right = pos2(center.x + 3.5, center.y);
+    let p_bottom = pos2(center.x, center.y + 3.5);
+    let p_left = pos2(center.x - 3.5, center.y);
+    let stroke = Stroke::new(1.0, color);
+    painter.line_segment([p_top, p_right], stroke);
+    painter.line_segment([p_right, p_bottom], stroke);
+    painter.line_segment([p_bottom, p_left], stroke);
+    painter.line_segment([p_left, p_top], stroke);
+}
+
+/// Icon-based segmented switcher for the main view modes (Notes pencil, Calendar, Graph, Canvas).
+pub fn top_mode_segmented(
+    ui: &mut Ui,
+    t: &Tokens,
+    current: crate::state::TopBarMode,
+) -> Option<crate::state::TopBarMode> {
+    use crate::state::TopBarMode;
+    let mut clicked = None;
+    Frame::NONE
+        .fill(t.field)
+        .stroke(Stroke::new(1.0, t.separator))
+        .corner_radius(CornerRadius::same(t.radius as u8))
+        .inner_margin(Margin::same(2))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            ui.horizontal(|ui| {
+                let modes = [
+                    (TopBarMode::Notes, "Notes (Pencil) — Ctrl+1", "notes"),
+                    (TopBarMode::Calendar, "Calendar (Schedule) — Ctrl+2", "calendar"),
+                    (TopBarMode::Graph, "Knowledge Graph — Ctrl+3", "graph"),
+                    (TopBarMode::Canvas, "Canvas — Ctrl+4", "canvas"),
+                ];
+
+                for (mode, tooltip, icon_name) in modes {
+                    let selected = mode == current;
+                    let size = vec2(34.0, 26.0);
+                    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+                    let radius = CornerRadius::same((t.radius as u8).saturating_sub(2));
+                    let color = if selected {
+                        ui.painter().rect_filled(rect, radius, t.card);
+                        ui.painter().rect_stroke(
+                            rect,
+                            radius,
+                            Stroke::new(1.0, t.card_border),
+                            egui::StrokeKind::Inside,
+                        );
+                        t.accent_text
+                    } else if resp.hovered() {
+                        ui.painter().rect_filled(rect, radius, t.hover);
+                        t.text
+                    } else {
+                        t.text_dim
+                    };
+
+                    match icon_name {
+                        "notes" => paint_pencil_icon(ui.painter(), rect, color),
+                        "calendar" => paint_calendar_icon(ui.painter(), rect, color),
+                        "graph" => paint_graph_icon(ui.painter(), rect, color),
+                        "canvas" => paint_canvas_icon(ui.painter(), rect, color),
+                        _ => {}
+                    }
+
+                    if resp.on_hover_cursor(CursorIcon::PointingHand).on_hover_text(tooltip).clicked() {
+                        clicked = Some(mode);
+                    }
+                }
+            });
+        });
+    clicked
+}
+
 /// Clickable pushpin button that never produces tofu.
 pub fn icon_pin_button(ui: &mut Ui, t: &Tokens, is_pinned: bool) -> Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());

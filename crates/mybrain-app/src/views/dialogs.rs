@@ -463,3 +463,180 @@ pub fn show_new_canvas(ctx: &egui::Context, state: &mut AppState) {
         state.new_canvas_folder = None;
     }
 }
+
+/// Modal dialog for inserting a custom Markdown table.
+pub fn show_insert_table(ctx: &egui::Context, state: &mut AppState) {
+    if !state.show_insert_table_dialog {
+        return;
+    }
+
+    let t = Tokens::get(ctx);
+    let mut should_close = false;
+    let mut should_insert = false;
+
+    let modal = egui::Modal::new(Id::unique("insert_table_modal"))
+        .backdrop_color(Color32::from_black_alpha(150))
+        .frame(theme::modal_frame(&t));
+
+    let modal_resp = modal.show(ctx, |ui| {
+        ui.set_width(380.0);
+
+        ui.horizontal(|ui| {
+            ui.heading(RichText::new("Insert Markdown Table").color(t.text).strong().size(16.0));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if theme::icon_close_button(ui, &t).clicked() {
+                    should_close = true;
+                }
+            });
+        });
+
+        ui.add_space(10.0);
+
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Columns:").color(t.text_dim).size(13.0));
+            ui.add(egui::DragValue::new(&mut state.insert_table_cols).range(1..=10).speed(0.1));
+            ui.add_space(20.0);
+            ui.label(RichText::new("Rows:").color(t.text_dim).size(13.0));
+            ui.add(egui::DragValue::new(&mut state.insert_table_rows).range(1..=30).speed(0.1));
+        });
+
+        ui.add_space(10.0);
+
+        Frame::NONE
+            .fill(t.field)
+            .stroke(Stroke::new(1.0, t.field_border))
+            .corner_radius(CornerRadius::same(t.radius_sm as u8))
+            .inner_margin(Margin::same(10))
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "Generates a {} × {} table ({} headers + {} data rows)",
+                        state.insert_table_cols,
+                        state.insert_table_rows,
+                        state.insert_table_cols,
+                        state.insert_table_rows
+                    ))
+                    .color(t.text_dim)
+                    .size(12.0),
+                );
+            });
+
+        ui.add_space(14.0);
+
+        ui.horizontal(|ui| {
+            if ui.add(
+                egui::Button::new(RichText::new("Insert Table").color(Color32::WHITE).strong())
+                    .fill(t.accent)
+                    .stroke(Stroke::NONE)
+                    .corner_radius(CornerRadius::same(t.radius_sm as u8)),
+            ).clicked() {
+                should_insert = true;
+                should_close = true;
+            }
+
+            if theme::ghost_button(ui, &t, RichText::new("Cancel").color(t.text_dim)).clicked() {
+                should_close = true;
+            }
+        });
+    });
+
+    if should_insert {
+        state.insert_table(state.insert_table_cols, state.insert_table_rows);
+    }
+
+    if modal_resp.should_close() || should_close {
+        state.show_insert_table_dialog = false;
+    }
+}
+
+/// Modal dialog for inserting a Markdown image.
+pub fn show_insert_image(ctx: &egui::Context, state: &mut AppState) {
+    if !state.show_insert_image_dialog {
+        return;
+    }
+
+    let t = Tokens::get(ctx);
+    let mut should_close = false;
+    let mut should_insert = false;
+
+    let modal = egui::Modal::new(Id::unique("insert_image_modal"))
+        .backdrop_color(Color32::from_black_alpha(150))
+        .frame(theme::modal_frame(&t));
+
+    let modal_resp = modal.show(ctx, |ui| {
+        ui.set_width(420.0);
+
+        ui.horizontal(|ui| {
+            ui.heading(RichText::new("Insert Image").color(t.text).strong().size(16.0));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if theme::icon_close_button(ui, &t).clicked() {
+                    should_close = true;
+                }
+            });
+        });
+
+        ui.add_space(10.0);
+
+        ui.label(RichText::new("Alt Text / Caption").color(t.text_dim).size(12.0));
+        field_frame(&t).show(ui, |ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut state.insert_image_alt)
+                    .hint_text("Diagram or Screenshot")
+                    .frame(Frame::NONE)
+                    .desired_width(f32::INFINITY),
+            );
+        });
+
+        ui.add_space(8.0);
+
+        ui.label(RichText::new("Image Path or URL").color(t.text_dim).size(12.0));
+        field_frame(&t).show(ui, |ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut state.insert_image_url)
+                    .hint_text("images/architecture.png or https://example.com/photo.png")
+                    .frame(Frame::NONE)
+                    .desired_width(f32::INFINITY),
+            );
+        });
+
+        ui.add_space(6.0);
+        ui.label(
+            RichText::new("Tip: Inserts standard Markdown ![alt](url), rendered as an image card in live preview.")
+                .color(t.text_faint)
+                .size(11.0)
+                .italics(),
+        );
+
+        ui.add_space(14.0);
+
+        ui.horizontal(|ui| {
+            let can_insert = !state.insert_image_url.trim().is_empty();
+            if ui.add_enabled(
+                can_insert,
+                egui::Button::new(RichText::new("Insert Image").color(Color32::WHITE).strong())
+                    .fill(t.accent)
+                    .stroke(Stroke::NONE)
+                    .corner_radius(CornerRadius::same(t.radius_sm as u8)),
+            ).clicked() {
+                should_insert = true;
+                should_close = true;
+            }
+
+            if theme::ghost_button(ui, &t, RichText::new("Cancel").color(t.text_dim)).clicked() {
+                should_close = true;
+            }
+        });
+    });
+
+    if should_insert {
+        let alt = state.insert_image_alt.trim().to_string();
+        let url = state.insert_image_url.trim().to_string();
+        state.insert_image(&alt, &url);
+        state.insert_image_alt.clear();
+        state.insert_image_url.clear();
+    }
+
+    if modal_resp.should_close() || should_close {
+        state.show_insert_image_dialog = false;
+    }
+}

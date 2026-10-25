@@ -23,6 +23,7 @@ pub enum ViewMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TopBarMode {
     Notes,
+    Calendar,
     Graph,
     Canvas,
 }
@@ -124,6 +125,16 @@ pub struct AppState {
 
     pub show_new_event_dialog: bool,
     pub new_event_draft: EventDraft,
+
+    // Insert Table Dialog
+    pub show_insert_table_dialog: bool,
+    pub insert_table_cols: usize,
+    pub insert_table_rows: usize,
+
+    // Insert Image Dialog
+    pub show_insert_image_dialog: bool,
+    pub insert_image_alt: String,
+    pub insert_image_url: String,
 
     // Daily notes navigation date & Calendar view
     pub selected_daily_date: NaiveDate,
@@ -239,6 +250,12 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
             new_note_name: String::new(),
             show_new_event_dialog: false,
             new_event_draft: EventDraft::new(today),
+            show_insert_table_dialog: false,
+            insert_table_cols: 3,
+            insert_table_rows: 3,
+            show_insert_image_dialog: false,
+            insert_image_alt: String::new(),
+            insert_image_url: String::new(),
             selected_daily_date: today,
             calendar_view_date: today,
             theme_kind,
@@ -640,6 +657,35 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
         self.set_status("Inserted object into note");
     }
 
+    pub fn insert_table(&mut self, cols: usize, rows: usize) {
+        let cols = cols.clamp(1, 12);
+        let rows = rows.clamp(1, 50);
+        let mut out = String::from("\n| ");
+        for c in 1..=cols {
+            out.push_str(&format!("Header {c} | "));
+        }
+        out.push('\n');
+        out.push_str("| ");
+        for _ in 1..=cols {
+            out.push_str("--- | ");
+        }
+        out.push('\n');
+        for r in 1..=rows {
+            out.push_str("| ");
+            for c in 1..=cols {
+                out.push_str(&format!("Cell {r}-{c} | "));
+            }
+            out.push('\n');
+        }
+        out.push('\n');
+        self.insert_snippet_into_active_note(&out);
+    }
+
+    pub fn insert_image(&mut self, alt: &str, url: &str) {
+        let snippet = format!("![{alt}]({url})");
+        self.insert_snippet_into_active_note(&snippet);
+    }
+
     pub fn create_event(&mut self) {
         let draft = self.new_event_draft.clone();
         if let Err(e) = draft.validate() {
@@ -999,6 +1045,21 @@ mod tests {
         assert_eq!(state.top_mode, TopBarMode::Notes);
         assert_eq!(state.sidebar_section, SidebarSection::Notes);
         assert!(state.editor_buffer.contains("November 15, 2026"));
+    }
+
+    #[test]
+    fn test_insert_table_and_image() {
+        let (_tmp, mut state) = temp_app_state();
+        let note_id = NoteId::new("Document").unwrap();
+        state.vault.create(note_id.clone(), "# My Doc\n").unwrap();
+        state.open_note(note_id);
+
+        state.insert_table(2, 3);
+        assert!(state.editor_buffer.contains("| Header 1 | Header 2 |"));
+        assert!(state.editor_buffer.contains("| Cell 3-2 |"));
+
+        state.insert_image("Architecture", "assets/arch.png");
+        assert!(state.editor_buffer.contains("![Architecture](assets/arch.png)"));
     }
 }
 

@@ -130,21 +130,24 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         RichText::new("+ Insert ▾").color(t.accent_text).size(12.0).strong(),
                         |ui| {
                             ui.set_min_width(175.0);
-                            if ui.button("📅 Event Object").clicked() {
-                                let today = chrono::Local::now().date_naive();
-                                let snippet = format!(
-                                    "```event\ntitle: New Event\ndate: {}\ntime: 10:00 - 11:00\nlocation: Room A\ndescription: Agenda details\n```\n",
-                                    today.format("%Y-%m-%d")
-                                );
-                                state.insert_snippet_into_active_note(&snippet);
+                            if ui.button("📅 Event Object...").clicked() {
+                                state.show_new_event_dialog = true;
                                 ui.close();
                             }
+                            if ui.button("📊 Custom Table...").clicked() {
+                                state.show_insert_table_dialog = true;
+                                ui.close();
+                            }
+                            if ui.button("🖼 Insert Image...").clicked() {
+                                state.show_insert_image_dialog = true;
+                                ui.close();
+                            }
+                            ui.separator();
                             if ui.button("🔍 Query Object").clicked() {
                                 let snippet = "```query\nevents\n```\n";
                                 state.insert_snippet_into_active_note(snippet);
                                 ui.close();
                             }
-                            ui.separator();
                             if ui.button("☑ Task Item").clicked() {
                                 state.insert_snippet_into_active_note("- [ ] ");
                                 ui.close();
@@ -153,16 +156,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                                 state.insert_snippet_into_active_note("[[]]");
                                 ui.close();
                             }
-                            if ui.button("🖼 Image").clicked() {
-                                state.insert_snippet_into_active_note("![Alt text](image.png)");
-                                ui.close();
-                            }
                             if ui.button("💡 Note Callout").clicked() {
                                 state.insert_snippet_into_active_note("> [!NOTE]\n> Key takeaway or important reminder.\n");
-                                ui.close();
-                            }
-                            if ui.button("📊 Table").clicked() {
-                                state.insert_snippet_into_active_note("| Column 1 | Column 2 |\n| --- | --- |\n| Value 1 | Value 2 |\n");
                                 ui.close();
                             }
                         },
@@ -202,6 +197,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             });
         });
 
+    theme::bottom_hairline(ui, ui.max_rect(), &t);
+
+    // Note formatting and rich object toolbar
+    render_note_formatting_toolbar(ui, state, &t);
     theme::bottom_hairline(ui, ui.max_rect(), &t);
 
     // Main workspace area
@@ -1148,4 +1147,209 @@ fn render_query_object_card(
             }
         });
     ui.add_space(8.0);
+}
+
+/// Renders the note-taking and markdown object toolbar.
+fn render_note_formatting_toolbar(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
+    Frame::NONE
+        .fill(t.dock)
+        .inner_margin(Margin::symmetric(24, 4))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+
+                // Headings
+                ui.menu_button(RichText::new("H ▾").color(t.text_dim).size(12.0).strong(), |ui| {
+                    if ui.button("Heading 1  #").clicked() {
+                        state.insert_snippet_into_active_note("# ");
+                        ui.close();
+                    }
+                    if ui.button("Heading 2  ##").clicked() {
+                        state.insert_snippet_into_active_note("## ");
+                        ui.close();
+                    }
+                    if ui.button("Heading 3  ###").clicked() {
+                        state.insert_snippet_into_active_note("### ");
+                        ui.close();
+                    }
+                });
+
+                ui.add_space(2.0);
+                ui.separator();
+                ui.add_space(2.0);
+
+                // Bold
+                if theme::ghost_button(ui, t, RichText::new("B").strong().color(t.text).size(12.0))
+                    .on_hover_text("Bold (**text**)")
+                    .clicked()
+                {
+                    state.insert_snippet_into_active_note("****");
+                }
+
+                // Italic
+                if theme::ghost_button(ui, t, RichText::new("I").italics().color(t.text).size(12.0))
+                    .on_hover_text("Italic (*text*)")
+                    .clicked()
+                {
+                    state.insert_snippet_into_active_note("**");
+                }
+
+                // Strikethrough
+                if theme::ghost_button(ui, t, RichText::new("S").strikethrough().color(t.text_dim).size(12.0))
+                    .on_hover_text("Strikethrough (~~text~~)")
+                    .clicked()
+                {
+                    state.insert_snippet_into_active_note("~~~~");
+                }
+
+                // Inline code
+                if theme::ghost_button(ui, t, RichText::new("`c`").monospace().color(t.accent_text).size(11.5))
+                    .on_hover_text("Inline Code (`code`)")
+                    .clicked()
+                {
+                    state.insert_snippet_into_active_note("``");
+                }
+
+                ui.add_space(2.0);
+                ui.separator();
+                ui.add_space(2.0);
+
+                // Checklist / Task
+                if theme::ghost_button(ui, t, RichText::new("☑ Task").color(t.text).size(11.5))
+                    .on_hover_text("Task Checkbox (- [ ] )")
+                    .clicked()
+                {
+                    state.insert_snippet_into_active_note("- [ ] ");
+                }
+
+                // Bullet List
+                if theme::ghost_button(ui, t, RichText::new("• List").color(t.text_dim).size(11.5))
+                    .on_hover_text("Bullet list (- )")
+                    .clicked()
+                {
+                    state.insert_snippet_into_active_note("- ");
+                }
+
+                // Numbered List
+                if theme::ghost_button(ui, t, RichText::new("1. List").color(t.text_dim).size(11.5))
+                    .on_hover_text("Numbered list (1. )")
+                    .clicked()
+                {
+                    state.insert_snippet_into_active_note("1. ");
+                }
+
+                ui.add_space(2.0);
+                ui.separator();
+                ui.add_space(2.0);
+
+                // 📊 Table Tool
+                ui.menu_button(
+                    RichText::new("📊 Table ▾").color(t.accent_text).size(11.5).strong(),
+                    |ui| {
+                        ui.set_min_width(160.0);
+                        if ui.button("2 × 2 Table").clicked() {
+                            state.insert_table(2, 2);
+                            ui.close();
+                        }
+                        if ui.button("3 × 3 Table").clicked() {
+                            state.insert_table(3, 3);
+                            ui.close();
+                        }
+                        if ui.button("4 × 4 Table").clicked() {
+                            state.insert_table(4, 4);
+                            ui.close();
+                        }
+                        ui.separator();
+                        if ui.button("Custom Table...").clicked() {
+                            state.show_insert_table_dialog = true;
+                            ui.close();
+                        }
+                    },
+                );
+
+                // 🖼 Insert Image Tool
+                if theme::ghost_button(ui, t, RichText::new("🖼 Image").color(t.accent_text).size(11.5).strong())
+                    .on_hover_text("Insert Image (![alt](url))")
+                    .clicked()
+                {
+                    state.show_insert_image_dialog = true;
+                }
+
+                // 📅 Event Object Tool
+                if theme::ghost_button(ui, t, RichText::new("📅 Event").color(t.warning).size(11.5))
+                    .on_hover_text("Insert embedded Event Object block")
+                    .clicked()
+                {
+                    state.show_new_event_dialog = true;
+                }
+
+                // 🔍 Query Object Tool
+                ui.menu_button(
+                    RichText::new("🔍 Query ▾").color(t.accent_text).size(11.5),
+                    |ui| {
+                        ui.set_min_width(180.0);
+                        if ui.button("📅 Upcoming Events").clicked() {
+                            state.insert_snippet_into_active_note("```query\nevents\n```\n");
+                            ui.close();
+                        }
+                        if ui.button("☑ Open Tasks").clicked() {
+                            state.insert_snippet_into_active_note("```query\ntodo\n```\n");
+                            ui.close();
+                        }
+                        if ui.button("🏷 Filter by Tag").clicked() {
+                            state.insert_snippet_into_active_note("```query\ntag: #project\n```\n");
+                            ui.close();
+                        }
+                        if ui.button("📁 Filter by Folder").clicked() {
+                            state.insert_snippet_into_active_note("```query\nfolder: Projects\n```\n");
+                            ui.close();
+                        }
+                        if ui.button("🔎 Search Query").clicked() {
+                            state.insert_snippet_into_active_note("```query\nsearch: keyword\n```\n");
+                            ui.close();
+                        }
+                    },
+                );
+
+                // 💡 Callout Box Tool
+                ui.menu_button(
+                    RichText::new("💡 Callout ▾").color(t.text_dim).size(11.5),
+                    |ui| {
+                        ui.set_min_width(140.0);
+                        if ui.button("Note [!NOTE]").clicked() {
+                            state.insert_snippet_into_active_note("> [!NOTE]\n> Key reminder or note.\n");
+                            ui.close();
+                        }
+                        if ui.button("Tip [!TIP]").clicked() {
+                            state.insert_snippet_into_active_note("> [!TIP]\n> Helpful tip or hint.\n");
+                            ui.close();
+                        }
+                        if ui.button("Warning [!WARNING]").clicked() {
+                            state.insert_snippet_into_active_note("> [!WARNING]\n> Important caution or warning.\n");
+                            ui.close();
+                        }
+                        if ui.button("Danger [!DANGER]").clicked() {
+                            state.insert_snippet_into_active_note("> [!DANGER]\n> Critical alert or error.\n");
+                            ui.close();
+                        }
+                    },
+                );
+
+                // 🔗 Wiki Link
+                if theme::ghost_button(ui, t, RichText::new("🔗 Link").color(t.text_dim).size(11.5))
+                    .on_hover_text("Insert [[Note Link]]")
+                    .clicked()
+                {
+                    state.insert_snippet_into_active_note("[[]]");
+                }
+
+                // ─ Divider
+                if theme::ghost_button(ui, t, RichText::new("─").color(t.text_faint).size(12.0))
+                    .on_hover_text("Divider Rule (---)")
+                    .clicked()
+                {
+                    state.insert_snippet_into_active_note("\n---\n");
+                }
+            });
+        });
 }
