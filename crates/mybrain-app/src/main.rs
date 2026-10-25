@@ -51,7 +51,7 @@ impl BrainwashApp {
             if i.modifiers.command && (i.key_pressed(egui::Key::B) || i.key_pressed(egui::Key::Backslash)) {
                 self.state.show_sidebar = !self.state.show_sidebar;
             }
-            // Ctrl+1: Notes, Ctrl+2: Calendar, Ctrl+3: Graph, Ctrl+4: Canvas
+            // Ctrl+1: Notes, Ctrl+2: Calendar, Ctrl+3: Graph
             if i.modifiers.command && i.key_pressed(egui::Key::Num1) {
                 self.state.top_mode = TopBarMode::Notes;
             }
@@ -60,9 +60,6 @@ impl BrainwashApp {
             }
             if i.modifiers.command && i.key_pressed(egui::Key::Num3) {
                 self.state.top_mode = TopBarMode::Graph;
-            }
-            if i.modifiers.command && i.key_pressed(egui::Key::Num4) {
-                self.state.top_mode = TopBarMode::Canvas;
             }
             // Ctrl+G: Toggle Notes / Graph modes
             if i.modifiers.command && i.key_pressed(egui::Key::G) {

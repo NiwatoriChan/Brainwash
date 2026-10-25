@@ -744,7 +744,6 @@ pub fn top_mode_segmented(
                     (TopBarMode::Notes, "Notes (Pencil) — Ctrl+1", "notes"),
                     (TopBarMode::Calendar, "Calendar (Schedule) — Ctrl+2", "calendar"),
                     (TopBarMode::Graph, "Knowledge Graph — Ctrl+3", "graph"),
-                    (TopBarMode::Canvas, "Canvas — Ctrl+4", "canvas"),
                 ];
 
                 for (mode, tooltip, icon_name) in modes {
@@ -772,7 +771,6 @@ pub fn top_mode_segmented(
                         "notes" => paint_pencil_icon(ui.painter(), rect, color),
                         "calendar" => paint_calendar_icon(ui.painter(), rect, color),
                         "graph" => paint_graph_icon(ui.painter(), rect, color),
-                        "canvas" => paint_canvas_icon(ui.painter(), rect, color),
                         _ => {}
                     }
 
