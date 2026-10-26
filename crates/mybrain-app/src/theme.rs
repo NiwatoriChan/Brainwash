@@ -725,7 +725,41 @@ pub fn paint_canvas_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
     painter.line_segment([p_left, p_top], stroke);
 }
 
-/// Icon-based segmented switcher for the main view modes (Notes pencil, Calendar, Graph, Canvas).
+/// Paint a clean vector folder icon.
+pub fn paint_folder_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let stroke = Stroke::new(1.2, color);
+    let min = rect.min;
+    let size = rect.size();
+    let body = Rect::from_min_max(
+        pos2(min.x + size.x * 0.1, min.y + size.y * 0.32),
+        pos2(min.x + size.x * 0.9, min.y + size.y * 0.82),
+    );
+    painter.rect_stroke(body, CornerRadius::same(1), stroke, egui::StrokeKind::Inside);
+    // Tab on top
+    painter.line_segment(
+        [
+            pos2(min.x + size.x * 0.1, min.y + size.y * 0.32),
+            pos2(min.x + size.x * 0.1, min.y + size.y * 0.2),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            pos2(min.x + size.x * 0.1, min.y + size.y * 0.2),
+            pos2(min.x + size.x * 0.45, min.y + size.y * 0.2),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            pos2(min.x + size.x * 0.45, min.y + size.y * 0.2),
+            pos2(min.x + size.x * 0.55, min.y + size.y * 0.32),
+        ],
+        stroke,
+    );
+}
+
+/// Icon-based segmented switcher for the main view modes (Notes pencil, Calendar, Graph).
 pub fn top_mode_segmented(
     ui: &mut Ui,
     t: &Tokens,
@@ -928,6 +962,8 @@ pub fn install_fonts(ctx: &egui::Context) {
     // Check system fonts for extra fallback symbols/glyphs on NixOS and standard Linux
     let candidate_fonts = [
         "/run/current-system/sw/share/X11/fonts/DejaVuSans.ttf",
+        "/run/current-system/sw/share/X11/fonts/unifont_upper.otf",
+        "/run/current-system/sw/share/X11/fonts/NotoColorEmoji.ttf",
         "/run/current-system/sw/share/X11/fonts/NotoSansSymbols.ttf",
         "/run/current-system/sw/share/X11/fonts/NotoSansSymbols2-Regular.otf",
         "/run/current-system/sw/share/X11/fonts/unifont.otf",

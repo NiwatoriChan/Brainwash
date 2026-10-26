@@ -86,6 +86,14 @@ impl BrainwashApp {
                     ViewMode::Split => ViewMode::PreviewOnly,
                 };
             }
+            // Ctrl+W: Close current tab
+            if i.modifiers.command && i.key_pressed(egui::Key::W) {
+                self.state.close_current_tab();
+            }
+            // Ctrl+Tab: Cycle next tab
+            if i.modifiers.command && i.key_pressed(egui::Key::Tab) {
+                self.state.cycle_next_tab();
+            }
             // Alt+Left / Alt+Right: Navigate history
             if i.modifiers.alt && i.key_pressed(egui::Key::ArrowLeft) {
                 self.state.go_back();
@@ -128,7 +136,7 @@ impl BrainwashApp {
                     let vault_name = self.state.vault.root().file_name()
                         .map(|s| s.to_string_lossy().into_owned())
                         .unwrap_or_else(|| "Vault".to_string());
-                    if theme::ghost_button(ui, t, RichText::new(format!("📁 {vault_name} ▾")).size(12.5).color(t.text_dim))
+                    if theme::ghost_button(ui, t, RichText::new(format!("{vault_name} ▾")).size(12.5).color(t.text_dim))
                         .on_hover_text("Open or switch vault (Ctrl+O)")
                         .clicked()
                     {
@@ -383,11 +391,8 @@ impl eframe::App for BrainwashApp {
                     }
                     TopBarMode::Notes => {
                         match self.state.sidebar_section {
-                            SidebarSection::Notes => {
+                            SidebarSection::Notes | SidebarSection::Daily => {
                                 views::editor::show(ui, &mut self.state);
-                            }
-                            SidebarSection::Daily => {
-                                views::daily_view::show(ui, &mut self.state);
                             }
                             SidebarSection::Events => {
                                 views::events_view::show(ui, &mut self.state);

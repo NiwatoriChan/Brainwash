@@ -17,6 +17,10 @@ use crate::theme::{self, Tokens};
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
 
+    // 0. Tab bar for open notes
+    render_tab_bar(ui, state, &t);
+    theme::bottom_hairline(ui, ui.max_rect(), &t);
+
     let Some(active_id) = state.active_note.clone() else {
         ui.centered_and_justified(|ui| {
             ui.vertical_centered(|ui| {
@@ -66,24 +70,38 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
                     // Clickable Note Emoji picker
                     let note_emoji = state.get_note_emoji(&active_id);
-                    let emoji_label = note_emoji.as_deref().unwrap_or("📄");
-                    ui.menu_button(RichText::new(emoji_label).size(15.0), |ui| {
-                        ui.set_min_width(180.0);
-                        ui.label(RichText::new("Note Icon:").size(11.0).color(t.text_faint));
-                        ui.horizontal_wrapped(|ui| {
-                            for emoji in ["📝", "📄", "💡", "🚀", "⭐", "📌", "🎯", "🔍", "🏷️", "💼", "📚", "🎨", "⚙️", "🌿", "⚡", "💬", "🧪", "📅"] {
-                                if ui.button(emoji).clicked() {
-                                    state.set_note_emoji(&active_id, Some(emoji));
-                                    ui.close();
+                    if let Some(emoji) = &note_emoji {
+                        ui.menu_button(RichText::new(emoji).size(15.0), |ui| {
+                            ui.set_min_width(180.0);
+                            ui.label(RichText::new("Note Icon:").size(11.0).color(t.text_faint));
+                            ui.horizontal_wrapped(|ui| {
+                                for emoji in ["📝", "📄", "💡", "🚀", "⭐", "📌", "🎯", "🔍", "🏷️", "💼", "📚", "🎨", "⚙️", "🌿", "⚡", "💬", "🧪", "📅"] {
+                                    if ui.button(emoji).clicked() {
+                                        state.set_note_emoji(&active_id, Some(emoji));
+                                        ui.close();
+                                    }
                                 }
+                            });
+                            ui.separator();
+                            if ui.button("Clear Icon").clicked() {
+                                state.set_note_emoji(&active_id, None);
+                                ui.close();
                             }
                         });
-                        ui.separator();
-                        if ui.button("Clear Icon").clicked() {
-                            state.set_note_emoji(&active_id, None);
-                            ui.close();
-                        }
-                    });
+                    } else {
+                        ui.menu_button(RichText::new("Icon ▾").size(12.0).color(t.text_faint), |ui| {
+                            ui.set_min_width(180.0);
+                            ui.label(RichText::new("Choose Note Icon:").size(11.0).color(t.text_faint));
+                            ui.horizontal_wrapped(|ui| {
+                                for emoji in ["📝", "📄", "💡", "🚀", "⭐", "📌", "🎯", "🔍", "🏷️", "💼", "📚", "🎨", "⚙️", "🌿", "⚡", "💬", "🧪", "📅"] {
+                                    if ui.button(emoji).clicked() {
+                                        state.set_note_emoji(&active_id, Some(emoji));
+                                        ui.close();
+                                    }
+                                }
+                            });
+                        });
+                    }
 
                     // Clickable Note Color dot
                     let note_color = state.get_note_color(&active_id);
@@ -1223,7 +1241,7 @@ fn render_note_formatting_toolbar(ui: &mut Ui, state: &mut AppState, t: &Tokens)
                     state.insert_snippet_into_active_note("1. ");
                 }
 
-                if theme::ghost_button(ui, t, RichText::new("☑ Task").color(t.text).size(11.5))
+                if theme::ghost_button(ui, t, RichText::new("Task").color(t.text).size(11.5))
                     .on_hover_text("Task Checkbox (- [ ] )")
                     .clicked()
                 {
@@ -1235,14 +1253,14 @@ fn render_note_formatting_toolbar(ui: &mut Ui, state: &mut AppState, t: &Tokens)
                 ui.add_space(2.0);
 
                 // 3. Links & Media
-                if theme::ghost_button(ui, t, RichText::new("🔗 Link").color(t.text_dim).size(11.5))
+                if theme::ghost_button(ui, t, RichText::new("Link").color(t.text_dim).size(11.5))
                     .on_hover_text("Insert [[Note Link]]")
                     .clicked()
                 {
                     state.insert_snippet_into_active_note("[[]]");
                 }
 
-                if theme::ghost_button(ui, t, RichText::new("🖼 Image").color(t.accent_text).size(11.5).strong())
+                if theme::ghost_button(ui, t, RichText::new("Image").color(t.accent_text).size(11.5).strong())
                     .on_hover_text("Insert Image (![alt](url))")
                     .clicked()
                 {
@@ -1255,7 +1273,7 @@ fn render_note_formatting_toolbar(ui: &mut Ui, state: &mut AppState, t: &Tokens)
 
                 // 4. Rich Objects
                 ui.menu_button(
-                    RichText::new("📊 Table ▾").color(t.accent_text).size(11.5).strong(),
+                    RichText::new("Table ▾").color(t.accent_text).size(11.5).strong(),
                     |ui| {
                         ui.set_min_width(160.0);
                         if ui.button("2 × 2 Table").clicked() {
@@ -1278,7 +1296,7 @@ fn render_note_formatting_toolbar(ui: &mut Ui, state: &mut AppState, t: &Tokens)
                     },
                 );
 
-                if theme::ghost_button(ui, t, RichText::new("📅 Event").color(t.warning).size(11.5))
+                if theme::ghost_button(ui, t, RichText::new("Event").color(t.warning).size(11.5))
                     .on_hover_text("Insert embedded Event Object block")
                     .clicked()
                 {
@@ -1286,26 +1304,26 @@ fn render_note_formatting_toolbar(ui: &mut Ui, state: &mut AppState, t: &Tokens)
                 }
 
                 ui.menu_button(
-                    RichText::new("🔍 Query ▾").color(t.accent_text).size(11.5),
+                    RichText::new("Query ▾").color(t.accent_text).size(11.5),
                     |ui| {
                         ui.set_min_width(180.0);
-                        if ui.button("📅 Upcoming Events").clicked() {
+                        if ui.button("Upcoming Events").clicked() {
                             state.insert_snippet_into_active_note("```query\nevents\n```\n");
                             ui.close();
                         }
-                        if ui.button("☑ Open Tasks").clicked() {
+                        if ui.button("Open Tasks").clicked() {
                             state.insert_snippet_into_active_note("```query\ntodo\n```\n");
                             ui.close();
                         }
-                        if ui.button("🏷 Filter by Tag").clicked() {
+                        if ui.button("Filter by Tag").clicked() {
                             state.insert_snippet_into_active_note("```query\ntag: #project\n```\n");
                             ui.close();
                         }
-                        if ui.button("📁 Filter by Folder").clicked() {
+                        if ui.button("Filter by Folder").clicked() {
                             state.insert_snippet_into_active_note("```query\nfolder: Projects\n```\n");
                             ui.close();
                         }
-                        if ui.button("🔎 Search Query").clicked() {
+                        if ui.button("Search Query").clicked() {
                             state.insert_snippet_into_active_note("```query\nsearch: keyword\n```\n");
                             ui.close();
                         }
@@ -1313,7 +1331,7 @@ fn render_note_formatting_toolbar(ui: &mut Ui, state: &mut AppState, t: &Tokens)
                 );
 
                 ui.menu_button(
-                    RichText::new("💡 Callout ▾").color(t.text_dim).size(11.5),
+                    RichText::new("Callout ▾").color(t.text_dim).size(11.5),
                     |ui| {
                         ui.set_min_width(140.0);
                         if ui.button("Note [!NOTE]").clicked() {
@@ -1343,4 +1361,126 @@ fn render_note_formatting_toolbar(ui: &mut Ui, state: &mut AppState, t: &Tokens)
                 }
             });
         });
+}
+
+/// Horizontal tab bar for managing multiple open note tabs.
+fn render_tab_bar(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
+    if state.open_tabs.is_empty() {
+        return;
+    }
+
+    let mut tab_to_open = None;
+    let mut tab_to_close = None;
+
+    Frame::NONE
+        .fill(t.dock)
+        .inner_margin(Margin {
+            left: 10,
+            right: 10,
+            top: 4,
+            bottom: 0,
+        })
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+
+                for tab_id in &state.open_tabs {
+                    let is_active = state.active_note.as_ref() == Some(tab_id);
+                    let note_color = state.get_note_color(tab_id);
+                    let note_emoji = state.get_note_emoji(tab_id);
+                    let tab_title = tab_id.name();
+
+                    let bg_color = if is_active {
+                        t.canvas
+                    } else {
+                        Color32::TRANSPARENT
+                    };
+
+                    let stroke = if is_active {
+                        Stroke::new(1.0, t.card_border)
+                    } else {
+                        Stroke::NONE
+                    };
+
+                    let frame = Frame::NONE
+                        .fill(bg_color)
+                        .stroke(stroke)
+                        .corner_radius(CornerRadius {
+                            nw: t.radius_sm as u8,
+                            ne: t.radius_sm as u8,
+                            sw: 0,
+                            se: 0,
+                        })
+                        .inner_margin(Margin {
+                            left: 10,
+                            right: 8,
+                            top: 5,
+                            bottom: 5,
+                        });
+
+                    let resp = frame.show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 5.0;
+
+                            // Color dot or active dot
+                            if let Some(col) = note_color {
+                                let (rect, _) = ui.allocate_exact_size(egui::vec2(7.0, 7.0), egui::Sense::hover());
+                                ui.painter().circle_filled(rect.center(), 3.5, col);
+                            } else if is_active {
+                                let (rect, _) = ui.allocate_exact_size(egui::vec2(7.0, 7.0), egui::Sense::hover());
+                                ui.painter().circle_filled(rect.center(), 3.5, t.accent);
+                            }
+
+                            // Custom emoji if assigned
+                            if let Some(emoji) = &note_emoji {
+                                ui.label(RichText::new(emoji).size(12.0));
+                            }
+
+                            // Tab title
+                            let text_color = if is_active { t.text } else { t.text_dim };
+                            let mut title_text = RichText::new(tab_title).color(text_color).size(12.0);
+                            if is_active {
+                                title_text = title_text.strong();
+                            }
+                            ui.label(title_text);
+
+                            // Dirty indicator
+                            if is_active && state.editor_dirty {
+                                ui.label(RichText::new("●").color(t.accent).size(8.0));
+                            }
+
+                            // Close button
+                            let close_resp = ui.add(
+                                egui::Button::new(RichText::new("×").size(13.0).color(t.text_faint))
+                                    .frame(false),
+                            );
+                            if close_resp.clicked() {
+                                tab_to_close = Some(tab_id.clone());
+                            }
+                        });
+                    });
+
+                    if resp.response.clicked() {
+                        tab_to_open = Some(tab_id.clone());
+                    }
+                    if resp.response.middle_clicked() {
+                        tab_to_close = Some(tab_id.clone());
+                    }
+                }
+
+                // "+" button to open a new note in a new tab
+                if theme::ghost_button(ui, t, RichText::new("+").color(t.text_dim).size(13.0).strong())
+                    .on_hover_text("New Note (Ctrl+N)")
+                    .clicked()
+                {
+                    state.show_new_note_dialog = true;
+                }
+            });
+        });
+
+    if let Some(id) = tab_to_close {
+        state.close_tab(&id);
+    } else if let Some(id) = tab_to_open {
+        state.open_note(id);
+    }
 }

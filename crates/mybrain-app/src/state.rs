@@ -53,8 +53,9 @@ pub struct AppState {
     pub quick_config: QuickNotes,
     pub event_store: EventStore,
 
-    // Active note & Editor
+    // Active note, open tabs & Editor
     pub active_note: Option<NoteId>,
+    pub open_tabs: Vec<NoteId>,
     pub editor_buffer: String,
     pub editor_cursor: usize,
     pub editor_dirty: bool,
@@ -203,6 +204,7 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
             quick_config,
             event_store,
             active_note: None,
+            open_tabs: Vec::new(),
             editor_buffer: String::new(),
             editor_cursor: 0,
             editor_dirty: false,
@@ -299,6 +301,9 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
     }
 
     pub fn open_note(&mut self, id: NoteId) {
+        if !self.open_tabs.contains(&id) {
+            self.open_tabs.push(id.clone());
+        }
         if self.active_note.as_ref() == Some(&id) {
             self.top_mode = TopBarMode::Notes;
             self.sidebar_section = SidebarSection::Notes;
@@ -320,6 +325,55 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
             self.history_idx = self.history.len() - 1;
             self.top_mode = TopBarMode::Notes;
             self.sidebar_section = SidebarSection::Notes;
+        }
+    }
+
+    pub fn close_tab(&mut self, id: &NoteId) {
+        let was_active = self.active_note.as_ref() == Some(id);
+        if was_active {
+            self.save_current();
+        }
+        if let Some(pos) = self.open_tabs.iter().position(|t| t == id) {
+            self.open_tabs.remove(pos);
+            if was_active {
+                if !self.open_tabs.is_empty() {
+                    let next_idx = pos.min(self.open_tabs.len() - 1);
+                    let next_id = self.open_tabs[next_idx].clone();
+                    if let Some(note) = self.vault.get(&next_id) {
+                        self.editor_buffer = note.content.clone();
+                        self.editor_cursor = self.editor_buffer.len();
+                        self.editor_dirty = false;
+                        self.active_note = Some(next_id);
+                    } else {
+                        self.active_note = None;
+                        self.editor_buffer.clear();
+                        self.editor_dirty = false;
+                    }
+                } else {
+                    self.active_note = None;
+                    self.editor_buffer.clear();
+                    self.editor_dirty = false;
+                }
+            }
+        }
+    }
+
+    pub fn close_current_tab(&mut self) {
+        if let Some(id) = self.active_note.clone() {
+            self.close_tab(&id);
+        }
+    }
+
+    pub fn cycle_next_tab(&mut self) {
+        if self.open_tabs.len() <= 1 {
+            return;
+        }
+        if let Some(curr) = &self.active_note {
+            if let Some(pos) = self.open_tabs.iter().position(|t| t == curr) {
+                let next_pos = (pos + 1) % self.open_tabs.len();
+                let next_id = self.open_tabs[next_pos].clone();
+                self.open_note(next_id);
+            }
         }
     }
 
@@ -567,6 +621,7 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
 
     pub fn delete_current_note(&mut self) {
         if let Some(id) = self.active_note.take() {
+            self.open_tabs.retain(|t| t != &id);
             if let Err(e) = self.vault.delete(&id) {
                 self.set_status(format!("Error deleting: {e}"));
             } else {
@@ -574,9 +629,13 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
                 self.editor_dirty = false;
                 self.link_index = LinkIndex::build(&self.vault);
                 self.set_status("Note deleted");
-                let next_id = self.vault.notes().next().map(|n| n.id.clone());
-                if let Some(id) = next_id {
-                    self.open_note(id);
+                if let Some(next_tab) = self.open_tabs.first().cloned() {
+                    self.open_note(next_tab);
+                } else {
+                    let next_id = self.vault.notes().next().map(|n| n.id.clone());
+                    if let Some(id) = next_id {
+                        self.open_note(id);
+                    }
                 }
             }
         }
@@ -1313,6 +1372,55 @@ mod tests {
         assert!(state.is_daily_or_event_folder("daily/2026"));
         assert!(state.is_daily_or_event_folder("Events"));
         assert!(!state.is_daily_or_event_folder("Projects"));
+    }
+
+    #[test]
+    fn test_multiple_tabs() {
+        let (_tmp, mut state) = temp_app_state();
+        state.open_tabs.clear();
+        state.active_note = None;
+        let id1 = NoteId::new("Note1").unwrap();
+        let id2 = NoteId::new("Note2").unwrap();
+        let id3 = NoteId::new("Note3").unwrap();
+
+        state.vault.create(id1.clone(), "# Note 1\n").unwrap();
+        state.vault.create(id2.clone(), "# Note 2\n").unwrap();
+        state.vault.create(id3.clone(), "# Note 3\n").unwrap();
+
+        // Open Note 1
+        state.open_note(id1.clone());
+        assert_eq!(state.open_tabs, vec![id1.clone()]);
+        assert_eq!(state.active_note.as_ref(), Some(&id1));
+
+        // Open Note 2 -> added to tabs
+        state.open_note(id2.clone());
+        assert_eq!(state.open_tabs, vec![id1.clone(), id2.clone()]);
+        assert_eq!(state.active_note.as_ref(), Some(&id2));
+
+        // Open Note 3 -> added to tabs
+        state.open_note(id3.clone());
+        assert_eq!(state.open_tabs, vec![id1.clone(), id2.clone(), id3.clone()]);
+        assert_eq!(state.active_note.as_ref(), Some(&id3));
+
+        // Cycle next tab
+        state.cycle_next_tab();
+        assert_eq!(state.active_note.as_ref(), Some(&id1));
+
+        // Close tab Note 2
+        state.close_tab(&id2);
+        assert_eq!(state.open_tabs, vec![id1.clone(), id3.clone()]);
+        // Note 1 remains active
+        assert_eq!(state.active_note.as_ref(), Some(&id1));
+
+        // Close active tab (Note 1) -> switches to Note 3
+        state.close_current_tab();
+        assert_eq!(state.open_tabs, vec![id3.clone()]);
+        assert_eq!(state.active_note.as_ref(), Some(&id3));
+
+        // Close last tab -> empty tabs
+        state.close_current_tab();
+        assert!(state.open_tabs.is_empty());
+        assert_eq!(state.active_note, None);
     }
 }
 
