@@ -1,5 +1,6 @@
 //! Persistent application settings and preferences for Brainwash.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 use serde::{Deserialize, Serialize};
@@ -29,6 +30,8 @@ pub struct AppSettings {
     pub canvas_snap_to_grid: bool,
     /// List of recently opened vault directory paths.
     pub recent_vaults: Vec<String>,
+    /// Custom emoji icons mapped to relative folder paths in tree view.
+    pub folder_emojis: BTreeMap<String, String>,
 }
 
 impl Default for AppSettings {
@@ -42,6 +45,7 @@ impl Default for AppSettings {
             events_folder: "Events".into(),
             canvas_snap_to_grid: true,
             recent_vaults: Vec::new(),
+            folder_emojis: BTreeMap::new(),
         }
     }
 }
@@ -94,6 +98,7 @@ mod tests {
         settings.ui_scale = 1.15;
         settings.record_recent_vault("/home/user/vault1");
         settings.record_recent_vault("/home/user/vault2");
+        settings.folder_emojis.insert("Projects".into(), "🚀".into());
 
         settings.save_to_file(&path).expect("save succeeds");
         let loaded = AppSettings::load_from_file(&path);
@@ -101,5 +106,6 @@ mod tests {
         assert_eq!(loaded.theme, "Pro");
         assert_eq!(loaded.ui_scale, 1.15);
         assert_eq!(loaded.recent_vaults, vec!["/home/user/vault2", "/home/user/vault1"]);
+        assert_eq!(loaded.folder_emojis.get("Projects"), Some(&"🚀".to_string()));
     }
 }

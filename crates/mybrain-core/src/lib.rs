@@ -37,6 +37,7 @@ pub use canvas::{CanvasEdge, CanvasFile, CanvasNode};
 pub use daily::DailyNotes;
 pub use error::{Error, Result};
 pub use events::{Event, EventDraft, EventStore};
+pub use frontmatter::Frontmatter;
 pub use index::LinkIndex;
 pub use links::WikiLink;
 pub use note::{Note, NoteId};

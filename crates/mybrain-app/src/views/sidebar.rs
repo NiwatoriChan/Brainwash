@@ -12,9 +12,17 @@ use crate::theme::{self, Tokens};
 #[derive(Clone, Debug)]
 enum FolderAction {
     NewNote(Option<String>),
-    NewEvent(Option<String>),
     NewCanvas(Option<String>),
     NewSubfolder(Option<String>),
+}
+
+#[derive(Clone, Debug)]
+enum TreeAction {
+    Folder(FolderAction),
+    SetNoteColor(NoteId, Option<String>),
+    SetNoteEmoji(NoteId, Option<String>),
+    DeleteNote(NoteId),
+    SetFolderEmoji(String, Option<String>),
 }
 
 #[derive(Default)]
@@ -98,13 +106,14 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
-/// Helper to render an individual note item with event/daily indicators.
+/// Helper to render an individual note item with custom color, emoji icon, and context menu.
 fn render_note_item(
     ui: &mut Ui,
     state: &AppState,
     t: &Tokens,
     id: &NoteId,
     show_folder_trail: bool,
+    tree_action: &mut Option<TreeAction>,
 ) -> egui::Response {
     let selected = state.active_note.as_ref() == Some(id) && state.top_mode != TopBarMode::Canvas;
     let is_event = state
@@ -114,7 +123,18 @@ fn render_note_item(
         .unwrap_or(false);
     let is_daily = state.daily_config.date_of(id).is_some();
 
-    let (dot, trail) = if is_event {
+    let custom_color = state.get_note_color(id);
+
+    let (dot, trail) = if let Some(cc) = custom_color {
+        (
+            Some(cc),
+            if show_folder_trail {
+                id.folder().map(|s| s.to_string())
+            } else {
+                None
+            },
+        )
+    } else if is_event {
         let date_text = state
             .vault
             .get(id)
@@ -134,7 +154,17 @@ fn render_note_item(
         )
     };
 
-    let resp = theme::list_row(ui, t, selected, dot, id.name(), trail.as_deref());
+    let display_name = if let Some(emoji) = state.get_note_emoji(id) {
+        if id.name().starts_with(&emoji) {
+            id.name().to_string()
+        } else {
+            format!("{emoji} {}", id.name())
+        }
+    } else {
+        id.name().to_string()
+    };
+
+    let resp = theme::list_row(ui, t, selected, dot, &display_name, trail.as_deref());
     if resp.drag_started() {
         egui::DragAndDrop::set_payload(
             ui.ctx(),
@@ -145,6 +175,55 @@ fn render_note_item(
             },
         );
     }
+
+    // Right-click context menu for setting Emoji, Color, or Deleting
+    resp.context_menu(|ui| {
+        ui.set_min_width(170.0);
+        ui.menu_button("🎨 Set Color", |ui| {
+            ui.set_min_width(140.0);
+            for (label, val) in [
+                ("Default (None)", None),
+                ("Red", Some("red")),
+                ("Coral", Some("coral")),
+                ("Amber", Some("yellow")),
+                ("Green", Some("green")),
+                ("Teal", Some("teal")),
+                ("Blue", Some("blue")),
+                ("Purple", Some("purple")),
+                ("Magenta", Some("magenta")),
+                ("Brown", Some("brown")),
+            ] {
+                if ui.button(label).clicked() {
+                    *tree_action = Some(TreeAction::SetNoteColor(id.clone(), val.map(String::from)));
+                    ui.close();
+                }
+            }
+        });
+
+        ui.menu_button("😀 Set Emoji", |ui| {
+            ui.set_min_width(180.0);
+            ui.horizontal_wrapped(|ui| {
+                for emoji in ["📝", "📄", "💡", "🚀", "⭐", "📌", "🎯", "🔍", "🏷️", "💼", "📚", "🎨", "⚙️", "🌿", "⚡", "💬", "🧪", "📅"] {
+                    if ui.button(emoji).clicked() {
+                        *tree_action = Some(TreeAction::SetNoteEmoji(id.clone(), Some(emoji.to_string())));
+                        ui.close();
+                    }
+                }
+            });
+            ui.separator();
+            if ui.button("Clear Emoji").clicked() {
+                *tree_action = Some(TreeAction::SetNoteEmoji(id.clone(), None));
+                ui.close();
+            }
+        });
+
+        ui.separator();
+        if ui.button("🗑 Delete Note").clicked() {
+            *tree_action = Some(TreeAction::DeleteNote(id.clone()));
+            ui.close();
+        }
+    });
+
     resp
 }
 
@@ -184,7 +263,7 @@ fn render_canvas_item(
     resp
 }
 
-/// Recursively render a folder node.
+/// Recursively render a folder node with emoji support and right-click actions.
 fn render_folder_node(
     ui: &mut Ui,
     name: &str,
@@ -194,7 +273,7 @@ fn render_folder_node(
     t: &Tokens,
     to_open_note: &mut Option<NoteId>,
     to_open_canvas: &mut Option<String>,
-    folder_action: &mut Option<FolderAction>,
+    tree_action: &mut Option<TreeAction>,
 ) {
     let id = ui.make_persistent_id(("folder_tree", full_path));
     let has_active =
@@ -205,10 +284,17 @@ fn render_folder_node(
         collapsing.set_open(true);
     }
 
-    collapsing
+    let folder_emoji = state.get_folder_emoji(full_path).unwrap_or_else(|| "📁".to_string());
+    let folder_display = if name.starts_with(&folder_emoji) {
+        name.to_string()
+    } else {
+        format!("{folder_emoji} {name}")
+    };
+
+    let header_resp = collapsing
         .show_header(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(name).strong().size(12.5).color(t.text_dim));
+                ui.label(RichText::new(&folder_display).strong().size(12.5).color(t.text_dim));
                 let count =
                     node.notes.len() + node.canvases.len() + node.subfolders.len();
                 ui.label(RichText::new(format!("{count}")).size(10.5).color(t.text_faint));
@@ -218,28 +304,38 @@ fn render_folder_node(
                     ui.menu_button("+", |ui| {
                         if !is_reserved {
                             if ui.button("New Note").clicked() {
-                                *folder_action =
-                                    Some(FolderAction::NewNote(Some(full_path.to_string())));
+                                *tree_action =
+                                    Some(TreeAction::Folder(FolderAction::NewNote(Some(full_path.to_string()))));
                                 ui.close();
                             }
-                        }
-                        if ui.button("New Event").clicked() {
-                            *folder_action =
-                                Some(FolderAction::NewEvent(Some(full_path.to_string())));
-                            ui.close();
-                        }
-                        if !is_reserved {
                             if ui.button("New Canvas").clicked() {
-                                *folder_action =
-                                    Some(FolderAction::NewCanvas(Some(full_path.to_string())));
+                                *tree_action =
+                                    Some(TreeAction::Folder(FolderAction::NewCanvas(Some(full_path.to_string()))));
                                 ui.close();
                             }
                             if ui.button("New Subfolder").clicked() {
-                                *folder_action =
-                                    Some(FolderAction::NewSubfolder(Some(full_path.to_string())));
+                                *tree_action =
+                                    Some(TreeAction::Folder(FolderAction::NewSubfolder(Some(full_path.to_string()))));
                                 ui.close();
                             }
+                            ui.separator();
                         }
+                        ui.menu_button("Set Emoji", |ui| {
+                            ui.set_min_width(180.0);
+                            ui.horizontal_wrapped(|ui| {
+                                for emoji in ["📁", "📂", "🚀", "💡", "💼", "📚", "🎨", "🛠️", "🎯", "🏷️", "📦", "🌟", "📝", "⚙️", "🌿", "⚡", "💬", "🧪"] {
+                                    if ui.button(emoji).clicked() {
+                                        *tree_action = Some(TreeAction::SetFolderEmoji(full_path.to_string(), Some(emoji.to_string())));
+                                        ui.close();
+                                    }
+                                }
+                            });
+                            ui.separator();
+                            if ui.button("Default (📁)").clicked() {
+                                *tree_action = Some(TreeAction::SetFolderEmoji(full_path.to_string(), None));
+                                ui.close();
+                            }
+                        });
                     });
                 });
             });
@@ -259,7 +355,7 @@ fn render_folder_node(
                     t,
                     to_open_note,
                     to_open_canvas,
-                    folder_action,
+                    tree_action,
                 );
             }
 
@@ -271,9 +367,9 @@ fn render_folder_node(
                 }
             }
 
-            // 3. Notes (including events and daily notes in this folder)
+            // 3. Notes (excluding daily and event notes)
             for note_id in &node.notes {
-                let resp = render_note_item(ui, state, t, note_id, false);
+                let resp = render_note_item(ui, state, t, note_id, false, tree_action);
                 if resp.clicked() {
                     *to_open_note = Some(note_id.clone());
                 }
@@ -291,18 +387,36 @@ fn render_folder_node(
                         )
                         .clicked()
                         {
-                            *folder_action =
-                                Some(FolderAction::NewNote(Some(full_path.to_string())));
+                            *tree_action =
+                                Some(TreeAction::Folder(FolderAction::NewNote(Some(full_path.to_string()))));
                         }
                     }
                 });
             }
         });
+
+    header_resp.0.context_menu(|ui| {
+        ui.set_min_width(180.0);
+        ui.label(RichText::new("Choose Folder Emoji:").size(11.0).color(t.text_faint));
+        ui.horizontal_wrapped(|ui| {
+            for emoji in ["📁", "📂", "🚀", "💡", "💼", "📚", "🎨", "🛠️", "🎯", "🏷️", "📦", "🌟", "📝", "⚙️", "🌿", "⚡", "💬", "🧪"] {
+                if ui.button(emoji).clicked() {
+                    *tree_action = Some(TreeAction::SetFolderEmoji(full_path.to_string(), Some(emoji.to_string())));
+                    ui.close();
+                }
+            }
+        });
+        ui.separator();
+        if ui.button("Default (📁)").clicked() {
+            *tree_action = Some(TreeAction::SetFolderEmoji(full_path.to_string(), None));
+            ui.close();
+        }
+    });
 }
 
 /// Notes explorer section: filter box, recursive folder tree, canvases, and root notes.
 fn render_notes_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
-    let mut folder_action: Option<FolderAction> = None;
+    let mut tree_action: Option<TreeAction> = None;
 
     // Quick action bar: section label + "+" dropdown menu
     ui.horizontal(|ui| {
@@ -310,19 +424,15 @@ fn render_notes_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.menu_button("+", |ui| {
                 if ui.button("New Note (Ctrl+N)").clicked() {
-                    folder_action = Some(FolderAction::NewNote(None));
-                    ui.close();
-                }
-                if ui.button("New Event (Ctrl+Shift+E)").clicked() {
-                    folder_action = Some(FolderAction::NewEvent(None));
+                    tree_action = Some(TreeAction::Folder(FolderAction::NewNote(None)));
                     ui.close();
                 }
                 if ui.button("New Canvas").clicked() {
-                    folder_action = Some(FolderAction::NewCanvas(None));
+                    tree_action = Some(TreeAction::Folder(FolderAction::NewCanvas(None)));
                     ui.close();
                 }
                 if ui.button("New Folder").clicked() {
-                    folder_action = Some(FolderAction::NewSubfolder(None));
+                    tree_action = Some(TreeAction::Folder(FolderAction::NewSubfolder(None)));
                     ui.close();
                 }
             });
@@ -375,11 +485,12 @@ fn render_notes_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
                     }
                 }
 
-                // Search notes
+                // Search notes (excluding daily notes and events)
                 let hits: Vec<NoteId> = state
                     .vault
                     .search(&state.search_query)
                     .into_iter()
+                    .filter(|hit| !state.is_daily_note(&hit.id) && !state.is_event_note(&hit.id))
                     .map(|hit| hit.id)
                     .collect();
 
@@ -392,7 +503,7 @@ fn render_notes_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
                     );
                 }
                 for id in hits {
-                    let resp = render_note_item(ui, state, t, &id, true);
+                    let resp = render_note_item(ui, state, t, &id, true, &mut tree_action);
                     if resp.clicked() {
                         to_open_note = Some(id);
                     }
@@ -403,8 +514,11 @@ fn render_notes_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
             // Build hierarchical folder tree
             let mut root = FolderTree::default();
 
-            // 1. Insert known folders (so empty folders appear in the tree)
+            // 1. Insert known folders (excluding daily and event folders)
             for folder in state.vault.all_folders() {
+                if state.is_daily_or_event_folder(&folder) {
+                    continue;
+                }
                 let segments: Vec<&str> =
                     folder.split('/').filter(|s| !s.is_empty()).collect();
                 let mut curr = &mut root;
@@ -429,9 +543,15 @@ fn render_notes_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
                 }
             }
 
-            // 3. Insert notes into the tree
+            // 3. Insert notes into the tree (excluding daily and event notes)
             for note in state.vault.notes() {
+                if state.is_daily_note(&note.id) || state.is_event_note(&note.id) {
+                    continue;
+                }
                 if let Some(folder_part) = note.id.folder() {
+                    if state.is_daily_or_event_folder(folder_part) {
+                        continue;
+                    }
                     let segments: Vec<&str> =
                         folder_part.split('/').filter(|s| !s.is_empty()).collect();
                     let mut curr = &mut root;
@@ -455,7 +575,7 @@ fn render_notes_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
                     t,
                     &mut to_open_note,
                     &mut to_open_canvas,
-                    &mut folder_action,
+                    &mut tree_action,
                 );
             }
 
@@ -473,7 +593,7 @@ fn render_notes_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
 
             // Root notes
             for note_id in &root.notes {
-                let resp = render_note_item(ui, state, t, note_id, false);
+                let resp = render_note_item(ui, state, t, note_id, false, &mut tree_action);
                 if resp.clicked() {
                     to_open_note = Some(note_id.clone());
                 }
@@ -493,28 +613,39 @@ fn render_notes_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
         state.open_canvas(&canvas_path);
     }
 
-    // Handle triggered folder actions
-    if let Some(act) = folder_action {
+    // Handle triggered tree actions
+    if let Some(act) = tree_action {
         match act {
-            FolderAction::NewNote(folder) => {
+            TreeAction::Folder(FolderAction::NewNote(folder)) => {
                 state.new_note_folder = folder;
                 state.new_note_name.clear();
                 state.show_new_note_dialog = true;
             }
-            FolderAction::NewEvent(folder) => {
-                state.new_event_folder = folder;
-                state.new_event_draft = EventDraft::new(Local::now().date_naive());
-                state.show_new_event_dialog = true;
-            }
-            FolderAction::NewCanvas(folder) => {
+            TreeAction::Folder(FolderAction::NewCanvas(folder)) => {
                 state.new_canvas_folder = folder;
                 state.new_canvas_name.clear();
                 state.show_new_canvas_dialog = true;
             }
-            FolderAction::NewSubfolder(parent) => {
+            TreeAction::Folder(FolderAction::NewSubfolder(parent)) => {
                 state.new_folder_parent = parent;
                 state.new_folder_name.clear();
                 state.show_new_folder_dialog = true;
+            }
+            TreeAction::SetNoteColor(id, color) => {
+                state.set_note_color(&id, color.as_deref());
+            }
+            TreeAction::SetNoteEmoji(id, emoji) => {
+                state.set_note_emoji(&id, emoji.as_deref());
+            }
+            TreeAction::DeleteNote(id) => {
+                if state.active_note.as_ref() == Some(&id) {
+                    state.delete_current_note();
+                } else {
+                    let _ = state.vault.delete(&id);
+                }
+            }
+            TreeAction::SetFolderEmoji(path, emoji) => {
+                state.set_folder_emoji(&path, emoji.as_deref());
             }
         }
     }

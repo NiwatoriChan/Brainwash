@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use chrono::{Datelike, Days, Local, NaiveDate};
+use egui::Color32;
 use mybrain_core::{
     AppSettings, CanvasFile, DailyNotes, EventDraft, EventStore, LinkIndex, NoteId, QuickNotes,
     Vault,
@@ -383,17 +384,156 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
         }
     }
 
+    pub fn is_daily_note(&self, id: &NoteId) -> bool {
+        self.daily_config.date_of(id).is_some()
+            || id.folder().map(|f| f.eq_ignore_ascii_case(&self.daily_config.folder) || f.to_lowercase().starts_with("daily/")).unwrap_or(false)
+            || id.as_str().to_lowercase().starts_with("daily/")
+    }
+
+    pub fn is_event_note(&self, id: &NoteId) -> bool {
+        self.vault.get(id).map(|n| mybrain_core::Event::from_note(n).is_some()).unwrap_or(false)
+            || id.folder().map(|f| f.eq_ignore_ascii_case(&self.event_store.folder) || f.to_lowercase().starts_with("events/")).unwrap_or(false)
+            || id.as_str().to_lowercase().starts_with("events/")
+    }
+
+    pub fn is_daily_or_event_folder(&self, folder: &str) -> bool {
+        let clean = folder.trim().trim_matches('/');
+        let daily = self.daily_config.folder.trim().trim_matches('/');
+        let events = self.event_store.folder.trim().trim_matches('/');
+
+        clean.eq_ignore_ascii_case(daily)
+            || clean.to_lowercase().starts_with(&format!("{}/", daily.to_lowercase()))
+            || clean.eq_ignore_ascii_case(events)
+            || clean.to_lowercase().starts_with(&format!("{}/", events.to_lowercase()))
+            || clean.eq_ignore_ascii_case("daily")
+            || clean.to_lowercase().starts_with("daily/")
+            || clean.eq_ignore_ascii_case("events")
+            || clean.to_lowercase().starts_with("events/")
+    }
+
     pub fn is_reserved_special_folder(&self, folder: &str) -> bool {
         let clean = folder.trim().trim_matches('/');
         let daily = self.daily_config.folder.trim().trim_matches('/');
+        let events = self.event_store.folder.trim().trim_matches('/');
         let quick = self.quick_config.folder.trim().trim_matches('/');
 
         clean.eq_ignore_ascii_case(daily)
             || clean.to_lowercase().starts_with(&format!("{}/", daily.to_lowercase()))
+            || clean.eq_ignore_ascii_case(events)
+            || clean.to_lowercase().starts_with(&format!("{}/", events.to_lowercase()))
             || clean.eq_ignore_ascii_case(quick)
             || clean.to_lowercase().starts_with(&format!("{}/", quick.to_lowercase()))
             || clean.eq_ignore_ascii_case("quick")
             || clean.to_lowercase().starts_with("quick/")
+            || clean.eq_ignore_ascii_case("events")
+            || clean.to_lowercase().starts_with("events/")
+    }
+
+    pub fn get_note_color(&self, id: &NoteId) -> Option<Color32> {
+        let content = if self.active_note.as_ref() == Some(id) {
+            &self.editor_buffer
+        } else {
+            &self.vault.get(id)?.content
+        };
+        let (fm, _) = mybrain_core::Frontmatter::parse(content);
+        let color_val = fm.get("color")?;
+        parse_color_str(color_val)
+    }
+
+    pub fn set_note_color(&mut self, id: &NoteId, color: Option<&str>) {
+        let is_active = self.active_note.as_ref() == Some(id);
+        let content = if is_active {
+            self.editor_buffer.clone()
+        } else if let Some(n) = self.vault.get(id) {
+            n.content.clone()
+        } else {
+            return;
+        };
+
+        let (mut fm, body) = mybrain_core::Frontmatter::parse(&content);
+        if let Some(c) = color {
+            fm.set("color", c);
+        } else {
+            fm.remove("color");
+        }
+        let new_content = if fm.is_empty() {
+            body.trim_start_matches('\n').to_string()
+        } else {
+            format!("{}{}", fm.render(), body.trim_start_matches('\n'))
+        };
+
+        let _ = self.vault.save(id, &new_content);
+        if is_active {
+            self.editor_buffer = new_content;
+            self.editor_dirty = false;
+        }
+    }
+
+    pub fn get_note_emoji(&self, id: &NoteId) -> Option<String> {
+        let content = if self.active_note.as_ref() == Some(id) {
+            &self.editor_buffer
+        } else if let Some(n) = self.vault.get(id) {
+            &n.content
+        } else {
+            return extract_leading_emoji(id.name());
+        };
+        let (fm, _) = mybrain_core::Frontmatter::parse(content);
+        if let Some(icon) = fm.get("icon") {
+            let trimmed = icon.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+        extract_leading_emoji(id.name())
+    }
+
+    pub fn set_note_emoji(&mut self, id: &NoteId, emoji: Option<&str>) {
+        let is_active = self.active_note.as_ref() == Some(id);
+        let content = if is_active {
+            self.editor_buffer.clone()
+        } else if let Some(n) = self.vault.get(id) {
+            n.content.clone()
+        } else {
+            return;
+        };
+
+        let (mut fm, body) = mybrain_core::Frontmatter::parse(&content);
+        if let Some(e) = emoji {
+            fm.set("icon", e.trim());
+        } else {
+            fm.remove("icon");
+        }
+        let new_content = if fm.is_empty() {
+            body.trim_start_matches('\n').to_string()
+        } else {
+            format!("{}{}", fm.render(), body.trim_start_matches('\n'))
+        };
+
+        let _ = self.vault.save(id, &new_content);
+        if is_active {
+            self.editor_buffer = new_content;
+            self.editor_dirty = false;
+        }
+    }
+
+    pub fn get_folder_emoji(&self, folder_path: &str) -> Option<String> {
+        let clean = folder_path.trim().trim_matches('/');
+        if let Some(emoji) = self.settings.folder_emojis.get(clean) {
+            return Some(emoji.clone());
+        }
+        let folder_name = clean.rsplit('/').next().unwrap_or(clean);
+        extract_leading_emoji(folder_name)
+    }
+
+    pub fn set_folder_emoji(&mut self, folder_path: &str, emoji: Option<&str>) {
+        let clean = folder_path.trim().trim_matches('/').to_string();
+        if let Some(e) = emoji {
+            self.settings.folder_emojis.insert(clean, e.trim().to_string());
+        } else {
+            self.settings.folder_emojis.remove(&clean);
+        }
+        let settings_path = self.vault.root().join(".brainwash").join("settings.json");
+        let _ = self.settings.save_to_file(&settings_path);
     }
 
     pub fn create_note(&mut self, name: &str) {
@@ -867,6 +1007,47 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
     }
 }
 
+/// Parse a color string (either hex `#RRGGBB` / `#RGB` or named preset from QUICK_COLORS).
+pub fn parse_color_str(color_str: &str) -> Option<Color32> {
+    let s = color_str.trim();
+    if s.is_empty() || s.eq_ignore_ascii_case("default") {
+        return None;
+    }
+    for def in crate::views::quick_capture::QUICK_COLORS {
+        if def.name.eq_ignore_ascii_case(s) {
+            return Some(def.dot_color);
+        }
+    }
+    if let Some(hex) = s.strip_prefix('#') {
+        if hex.len() == 6 {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            return Some(Color32::from_rgb(r, g, b));
+        } else if hex.len() == 3 {
+            let r = u8::from_str_radix(&hex[0..1], 16).ok()? * 17;
+            let g = u8::from_str_radix(&hex[1..2], 16).ok()? * 17;
+            let b = u8::from_str_radix(&hex[2..3], 16).ok()? * 17;
+            return Some(Color32::from_rgb(r, g, b));
+        }
+    }
+    None
+}
+
+/// Extract leading emoji symbol from a string if present.
+pub fn extract_leading_emoji(s: &str) -> Option<String> {
+    let mut chars = s.chars();
+    let first = chars.next()?;
+    if (first >= '\u{1F300}' && first <= '\u{1FAFF}')
+        || (first >= '\u{2600}' && first <= '\u{27BF}')
+        || (first >= '\u{2300}' && first <= '\u{23FF}')
+        || (first >= '\u{2B50}' && first <= '\u{2B55}')
+    {
+        return Some(first.to_string());
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1061,5 +1242,78 @@ mod tests {
         state.insert_image("Architecture", "assets/arch.png");
         assert!(state.editor_buffer.contains("![Architecture](assets/arch.png)"));
     }
+
+    #[test]
+    fn test_note_custom_color_and_emoji() {
+        let (_tmp, mut state) = temp_app_state();
+        let note_id = NoteId::new("Projects/Idea").unwrap();
+        state.vault.create(note_id.clone(), "# Idea\n").unwrap();
+        state.open_note(note_id.clone());
+
+        // Color initially None
+        assert_eq!(state.get_note_color(&note_id), None);
+        assert_eq!(state.get_note_emoji(&note_id), None);
+
+        // Set preset color
+        state.set_note_color(&note_id, Some("coral"));
+        assert!(state.get_note_color(&note_id).is_some());
+        assert!(state.editor_buffer.contains("color: coral"));
+
+        // Set hex color
+        state.set_note_color(&note_id, Some("#3a86ff"));
+        assert_eq!(state.get_note_color(&note_id), Some(Color32::from_rgb(0x3a, 0x86, 0xff)));
+        assert!(state.editor_buffer.contains("color: #3a86ff"));
+
+        // Set emoji
+        state.set_note_emoji(&note_id, Some("🚀"));
+        assert_eq!(state.get_note_emoji(&note_id), Some("🚀".to_string()));
+        assert!(state.editor_buffer.contains("icon: 🚀"));
+
+        // Clear color and emoji
+        state.set_note_color(&note_id, None);
+        assert_eq!(state.get_note_color(&note_id), None);
+        state.set_note_emoji(&note_id, None);
+        assert_eq!(state.get_note_emoji(&note_id), None);
+    }
+
+    #[test]
+    fn test_folder_emoji() {
+        let (_tmp, mut state) = temp_app_state();
+        assert_eq!(state.get_folder_emoji("Projects"), None);
+
+        state.set_folder_emoji("Projects", Some("📁"));
+        assert_eq!(state.get_folder_emoji("Projects"), Some("📁".to_string()));
+
+        // Also works with trailing slashes
+        assert_eq!(state.get_folder_emoji("Projects/"), Some("📁".to_string()));
+
+        state.set_folder_emoji("Projects", None);
+        assert_eq!(state.get_folder_emoji("Projects"), None);
+    }
+
+    #[test]
+    fn test_is_daily_and_event_isolation() {
+        let (_tmp, mut state) = temp_app_state();
+        let daily_id = NoteId::new("Daily/2026-10-25").unwrap();
+        let event_id = NoteId::new("Events/Meeting").unwrap();
+        let normal_id = NoteId::new("Projects/Brainwash").unwrap();
+
+        state.vault.create(daily_id.clone(), "# 2026-10-25\n").unwrap();
+        state.vault.create(event_id.clone(), "---\ntype: event\ndate: 2026-10-25\n---\n# Meeting\n").unwrap();
+        state.vault.create(normal_id.clone(), "# Brainwash\n").unwrap();
+
+        assert!(state.is_daily_note(&daily_id));
+        assert!(!state.is_daily_note(&normal_id));
+        assert!(!state.is_daily_note(&event_id));
+
+        assert!(state.is_event_note(&event_id));
+        assert!(!state.is_event_note(&normal_id));
+
+        assert!(state.is_daily_or_event_folder("Daily"));
+        assert!(state.is_daily_or_event_folder("daily/2026"));
+        assert!(state.is_daily_or_event_folder("Events"));
+        assert!(!state.is_daily_or_event_folder("Projects"));
+    }
 }
+
 
