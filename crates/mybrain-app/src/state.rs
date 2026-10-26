@@ -29,6 +29,16 @@ pub enum TopBarMode {
     Canvas,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum SidebarFilter {
+    #[default]
+    All,
+    Notes,
+    Daily,
+    Events,
+    Canvas,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SidebarSection {
     Notes,
@@ -68,6 +78,7 @@ pub struct AppState {
     // Tabs & Panels
     pub top_mode: TopBarMode,
     pub sidebar_section: SidebarSection,
+    pub sidebar_filter: SidebarFilter,
     pub show_sidebar: bool,
     pub show_backlinks: bool,
     pub search_query: String,
@@ -213,6 +224,7 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
             history_idx: 0,
             top_mode: TopBarMode::Notes,
             sidebar_section: SidebarSection::Notes,
+            sidebar_filter: SidebarFilter::All,
             show_sidebar: true,
             show_backlinks: false,
             search_query: String::new(),
@@ -306,7 +318,6 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
         }
         if self.active_note.as_ref() == Some(&id) {
             self.top_mode = TopBarMode::Notes;
-            self.sidebar_section = SidebarSection::Notes;
             return;
         }
         self.save_current();
@@ -324,7 +335,6 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
             self.history.push(id);
             self.history_idx = self.history.len() - 1;
             self.top_mode = TopBarMode::Notes;
-            self.sidebar_section = SidebarSection::Notes;
         }
     }
 
@@ -448,6 +458,18 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
         self.vault.get(id).map(|n| mybrain_core::Event::from_note(n).is_some()).unwrap_or(false)
             || id.folder().map(|f| f.eq_ignore_ascii_case(&self.event_store.folder) || f.to_lowercase().starts_with("events/")).unwrap_or(false)
             || id.as_str().to_lowercase().starts_with("events/")
+    }
+
+    #[allow(dead_code)]
+    pub fn is_quick_note(&self, id: &NoteId) -> bool {
+        let quick = self.quick_config.folder.trim().trim_matches('/');
+        id.folder().map(|f| {
+            let clean = f.trim().trim_matches('/');
+            clean.eq_ignore_ascii_case(quick)
+                || clean.to_lowercase().starts_with(&format!("{}/", quick.to_lowercase()))
+                || clean.eq_ignore_ascii_case("quick")
+                || clean.to_lowercase().starts_with("quick/")
+        }).unwrap_or(false)
     }
 
     pub fn is_daily_or_event_folder(&self, folder: &str) -> bool {
@@ -673,6 +695,7 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
         self.set_status(format!("Opened daily note for {}", date));
     }
 
+    #[allow(dead_code)]
     pub fn shift_daily_date(&mut self, days: i64) {
         let new_date = if days >= 0 {
             self.selected_daily_date.checked_add_days(Days::new(days as u64))
@@ -1173,7 +1196,6 @@ mod tests {
 
         // Calling open_note even if active switches to Notes text editor
         state.open_note(id.clone());
-        assert_eq!(state.sidebar_section, SidebarSection::Notes);
         assert_eq!(state.top_mode, TopBarMode::Notes);
         assert_eq!(state.active_note.as_ref(), Some(&id));
     }
@@ -1196,7 +1218,7 @@ mod tests {
         // 1. Target daily note is open in editor
         let daily_id = state.daily_config.id_for(event_date);
         assert_eq!(state.active_note.as_ref(), Some(&daily_id));
-        assert_eq!(state.sidebar_section, SidebarSection::Notes);
+        assert_eq!(state.top_mode, TopBarMode::Notes);
 
         // 2. Daily note created and has event object embedded
         let daily_note = state.vault.get(&daily_id).expect("daily note should be auto-created");
@@ -1283,7 +1305,6 @@ mod tests {
         assert!(state.vault.get(&daily_id).is_some());
         assert_eq!(state.active_note.as_ref(), Some(&daily_id));
         assert_eq!(state.top_mode, TopBarMode::Notes);
-        assert_eq!(state.sidebar_section, SidebarSection::Notes);
         assert!(state.editor_buffer.contains("November 15, 2026"));
     }
 
