@@ -1,4 +1,5 @@
 //! Daily Notes calendar and timeline navigator.
+#![allow(dead_code)]
 
 use std::collections::BTreeMap;
 

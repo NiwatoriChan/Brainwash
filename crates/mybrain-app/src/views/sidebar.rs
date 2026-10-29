@@ -23,6 +23,7 @@ enum TreeAction {
     SetNoteEmoji(NoteId, Option<String>),
     DeleteNote(NoteId),
     SetFolderEmoji(String, Option<String>),
+    OpenEmojiPicker(crate::state::EmojiPickerTarget),
 }
 
 #[derive(Default)]
@@ -160,8 +161,12 @@ fn render_note_item(
         } else {
             format!("{emoji} {}", id.name())
         }
+    } else if is_daily {
+        format!("📅 {}", id.name())
+    } else if is_event {
+        format!("🔔 {}", id.name())
     } else {
-        id.name().to_string()
+        format!("📝 {}", id.name())
     };
 
     let resp = theme::list_row(ui, t, selected, dot, &display_name, trail.as_deref());
@@ -201,7 +206,8 @@ fn render_note_item(
         });
 
         ui.menu_button("Set Emoji", |ui| {
-            ui.set_min_width(180.0);
+            ui.set_min_width(200.0);
+            ui.label(RichText::new("Quick Emojis:").size(11.0).color(t.text_faint));
             ui.horizontal_wrapped(|ui| {
                 for emoji in ["📝", "📄", "💡", "🚀", "⭐", "📌", "🎯", "🔍", "🏷️", "💼", "📚", "🎨", "⚙️", "🌿", "⚡", "💬", "🧪", "📅"] {
                     if ui.button(emoji).clicked() {
@@ -211,6 +217,10 @@ fn render_note_item(
                 }
             });
             ui.separator();
+            if ui.button("🔍 More Emojis…").clicked() {
+                *tree_action = Some(TreeAction::OpenEmojiPicker(crate::state::EmojiPickerTarget::Note(id.clone())));
+                ui.close();
+            }
             if ui.button("Clear Emoji").clicked() {
                 *tree_action = Some(TreeAction::SetNoteEmoji(id.clone(), None));
                 ui.close();
@@ -322,7 +332,8 @@ fn render_folder_node(
                             ui.separator();
                         }
                         ui.menu_button("Set Emoji", |ui| {
-                            ui.set_min_width(180.0);
+                            ui.set_min_width(200.0);
+                            ui.label(RichText::new("Quick Emojis:").size(11.0).color(t.text_faint));
                             ui.horizontal_wrapped(|ui| {
                                 for emoji in ["📁", "📂", "🚀", "💡", "💼", "📚", "🎨", "🛠️", "🎯", "🏷️", "📦", "🌟", "📝", "⚙️", "🌿", "⚡", "💬", "🧪"] {
                                     if ui.button(emoji).clicked() {
@@ -332,6 +343,10 @@ fn render_folder_node(
                                 }
                             });
                             ui.separator();
+                            if ui.button("🔍 More Emojis…").clicked() {
+                                *tree_action = Some(TreeAction::OpenEmojiPicker(crate::state::EmojiPickerTarget::Folder(full_path.to_string())));
+                                ui.close();
+                            }
                             if ui.button("Reset to Default").clicked() {
                                 *tree_action = Some(TreeAction::SetFolderEmoji(full_path.to_string(), None));
                                 ui.close();
@@ -397,8 +412,8 @@ fn render_folder_node(
         });
 
     header_resp.0.context_menu(|ui| {
-        ui.set_min_width(180.0);
-        ui.label(RichText::new("Choose Folder Emoji:").size(11.0).color(t.text_faint));
+        ui.set_min_width(200.0);
+        ui.label(RichText::new("Quick Folder Emojis:").size(11.0).color(t.text_faint));
         ui.horizontal_wrapped(|ui| {
             for emoji in ["📁", "📂", "🚀", "💡", "💼", "📚", "🎨", "🛠️", "🎯", "🏷️", "📦", "🌟", "📝", "⚙️", "🌿", "⚡", "💬", "🧪"] {
                 if ui.button(emoji).clicked() {
@@ -408,6 +423,10 @@ fn render_folder_node(
             }
         });
         ui.separator();
+        if ui.button("🔍 More Emojis…").clicked() {
+            *tree_action = Some(TreeAction::OpenEmojiPicker(crate::state::EmojiPickerTarget::Folder(full_path.to_string())));
+            ui.close();
+        }
         if ui.button("Reset to Default").clicked() {
             *tree_action = Some(TreeAction::SetFolderEmoji(full_path.to_string(), None));
             ui.close();
@@ -648,17 +667,35 @@ fn render_notes_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
             TreeAction::SetFolderEmoji(path, emoji) => {
                 state.set_folder_emoji(&path, emoji.as_deref());
             }
+            TreeAction::OpenEmojiPicker(target) => {
+                state.emoji_picker_target = Some(target);
+                state.emoji_picker_search.clear();
+            }
         }
     }
 }
 
-/// Daily Notes section in sidebar: date switcher and timeline of daily notes.
+/// Daily Notes section in sidebar: date switcher, scheduled events, and timeline of daily notes.
 fn render_daily_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
+    let mut to_open_date = None;
+    let mut to_open_event = None;
+    let mut tree_action: Option<TreeAction> = None;
+
     ui.horizontal(|ui| {
         theme::section_label(ui, t, "Daily Notes");
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if theme::ghost_button(ui, t, RichText::new("Calendar ↗").color(t.accent_text).size(11.5))
+                .on_hover_text("Open Full Calendar View (Ctrl+2)")
+                .clicked()
+            {
+                state.top_mode = TopBarMode::Calendar;
+            }
             if theme::ghost_button(ui, t, RichText::new("Today").color(t.accent_text).size(11.5)).clicked() {
                 state.open_daily_today();
+            }
+            if theme::ghost_button(ui, t, RichText::new("+ Event").color(t.success).size(11.5)).clicked() {
+                state.new_event_draft = mybrain_core::EventDraft::new(state.selected_daily_date);
+                state.show_new_event_dialog = true;
             }
         });
     });
@@ -680,7 +717,7 @@ fn render_daily_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
                     .on_hover_text("Open daily note for this date")
                     .clicked()
                 {
-                    state.open_daily_date(state.selected_daily_date);
+                    to_open_date = Some(state.selected_daily_date);
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -692,10 +729,51 @@ fn render_daily_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
         });
 
     ui.add_space(4.0);
+
+    // Scheduled Events on selected day
+    let day_events = state.event_store.on(&state.vault, state.selected_daily_date);
+    let is_today = state.selected_daily_date == Local::now().date_naive();
+    let day_title = if is_today {
+        "Today's Events".to_string()
+    } else {
+        format!("Events ({})", state.selected_daily_date.format("%b %-d"))
+    };
+
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(day_title).color(t.text_dim).size(11.5).strong());
+        if !day_events.is_empty() {
+            theme::pill(ui, &format!("{}", day_events.len()), t.warning, t.accent_soft);
+        }
+    });
+
+    if day_events.is_empty() {
+        ui.label(RichText::new("  No events scheduled").color(t.text_faint).size(11.0));
+    } else {
+        for ev in day_events {
+            let is_active = state.active_note.as_ref() == Some(&ev.id);
+            let time_label = ev.time_label();
+            let title_with_icon = format!("🔔 {}", ev.title);
+            let resp = theme::list_row(ui, t, is_active, Some(t.warning), &title_with_icon, Some(&time_label));
+            if resp.drag_started() {
+                egui::DragAndDrop::set_payload(
+                    ui.ctx(),
+                    crate::state::DraggedNote {
+                        id: ev.id.as_str().to_string(),
+                        name: ev.id.name().to_string(),
+                        is_canvas: false,
+                    },
+                );
+            }
+            if resp.clicked() {
+                to_open_event = Some(ev.id.clone());
+            }
+        }
+    }
+
+    ui.add_space(4.0);
     ui.label(RichText::new("Daily Notes Timeline").color(t.text_faint).size(11.0));
 
     let existing = state.daily_config.existing_dates(&state.vault);
-    let mut to_open = None;
 
     ScrollArea::vertical()
         .id_salt("sidebar_daily_scroll")
@@ -714,10 +792,18 @@ fn render_daily_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
                     let id = state.daily_config.id_for(date);
                     let is_active = state.active_note.as_ref() == Some(&id);
                     let is_today = date == today;
+                    let custom_color = state.get_note_color(&id);
+                    let custom_emoji = state.get_note_emoji(&id);
+                    let dot = custom_color.unwrap_or(t.accent);
 
                     let trail = if is_today { Some("Today") } else { None };
-                    let title = date.format("%Y-%m-%d (%a)").to_string();
-                    let resp = theme::list_row(ui, t, is_active, Some(t.accent), &title, trail);
+                    let date_display = if let Some(emoji) = custom_emoji {
+                        format!("{emoji} {}", date.format("%Y-%m-%d (%a)"))
+                    } else {
+                        format!("📅 {}", date.format("%Y-%m-%d (%a)"))
+                    };
+
+                    let resp = theme::list_row(ui, t, is_active, Some(dot), &date_display, trail);
                     if resp.drag_started() {
                         egui::DragAndDrop::set_payload(
                             ui.ctx(),
@@ -729,14 +815,80 @@ fn render_daily_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
                         );
                     }
                     if resp.clicked() {
-                        to_open = Some(date);
+                        to_open_date = Some(date);
                     }
+
+                    // Context menu on daily note item
+                    resp.context_menu(|ui| {
+                        ui.set_min_width(170.0);
+                        ui.menu_button("🎨 Set Color", |ui| {
+                            ui.set_min_width(140.0);
+                            for (label, val) in [
+                                ("Default (Accent)", None),
+                                ("Red", Some("red")),
+                                ("Coral", Some("coral")),
+                                ("Amber", Some("yellow")),
+                                ("Green", Some("green")),
+                                ("Teal", Some("teal")),
+                                ("Blue", Some("blue")),
+                                ("Purple", Some("purple")),
+                                ("Magenta", Some("magenta")),
+                                ("Brown", Some("brown")),
+                            ] {
+                                if ui.button(label).clicked() {
+                                    tree_action = Some(TreeAction::SetNoteColor(id.clone(), val.map(String::from)));
+                                    ui.close();
+                                }
+                            }
+                        });
+
+                        ui.menu_button("Set Emoji", |ui| {
+                            ui.set_min_width(200.0);
+                            ui.label(RichText::new("Quick Emojis:").size(11.0).color(t.text_faint));
+                            ui.horizontal_wrapped(|ui| {
+                                for emoji in ["📅", "📝", "💡", "⭐", "🚀", "📌", "🎯", "🌿", "⚡", "☕", "🎉"] {
+                                    if ui.button(emoji).clicked() {
+                                        tree_action = Some(TreeAction::SetNoteEmoji(id.clone(), Some(emoji.to_string())));
+                                        ui.close();
+                                    }
+                                }
+                            });
+                            ui.separator();
+                            if ui.button("🔍 More Emojis…").clicked() {
+                                tree_action = Some(TreeAction::OpenEmojiPicker(crate::state::EmojiPickerTarget::Note(id.clone())));
+                                ui.close();
+                            }
+                            if ui.button("Reset to Default (📅)").clicked() {
+                                tree_action = Some(TreeAction::SetNoteEmoji(id.clone(), None));
+                                ui.close();
+                            }
+                        });
+                    });
                 }
             }
         });
 
-    if let Some(date) = to_open {
+    if let Some(date) = to_open_date {
         state.open_daily_date(date);
+    }
+    if let Some(event_id) = to_open_event {
+        state.open_note(event_id);
+    }
+
+    if let Some(act) = tree_action {
+        match act {
+            TreeAction::SetNoteColor(id, color) => {
+                state.set_note_color(&id, color.as_deref());
+            }
+            TreeAction::SetNoteEmoji(id, emoji) => {
+                state.set_note_emoji(&id, emoji.as_deref());
+            }
+            TreeAction::OpenEmojiPicker(target) => {
+                state.emoji_picker_target = Some(target);
+                state.emoji_picker_search.clear();
+            }
+            _ => {}
+        }
     }
 }
 

@@ -4,6 +4,7 @@ pub mod command_palette;
 pub mod daily_view;
 pub mod dialogs;
 pub mod editor;
+pub mod emoji_picker;
 pub mod events_view;
 pub mod graph_view;
 pub mod quick_capture;

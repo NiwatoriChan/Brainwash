@@ -39,6 +39,14 @@ pub enum SidebarFilter {
     Canvas,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EmojiPickerTarget {
+    Note(NoteId),
+    Folder(String),
+    NewFolderDialog,
+    NewNoteDialog,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SidebarSection {
     Notes,
@@ -78,6 +86,7 @@ pub struct AppState {
     // Tabs & Panels
     pub top_mode: TopBarMode,
     pub sidebar_section: SidebarSection,
+    #[allow(dead_code)]
     pub sidebar_filter: SidebarFilter,
     pub show_sidebar: bool,
     pub show_backlinks: bool,
@@ -135,9 +144,15 @@ pub struct AppState {
 
     pub show_new_note_dialog: bool,
     pub new_note_name: String,
+    pub new_note_emoji: Option<String>,
 
     pub show_new_event_dialog: bool,
     pub new_event_draft: EventDraft,
+
+    // Emoji Picker Overlay
+    pub emoji_picker_target: Option<EmojiPickerTarget>,
+    pub emoji_picker_search: String,
+    pub new_folder_emoji: Option<String>,
 
     // Insert Table Dialog
     pub show_insert_table_dialog: bool,
@@ -151,6 +166,7 @@ pub struct AppState {
 
     // Daily notes navigation date & Calendar view
     pub selected_daily_date: NaiveDate,
+    #[allow(dead_code)]
     pub calendar_view_date: NaiveDate,
 
     // Theme
@@ -263,8 +279,12 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
             quick_edit_color: None,
             show_new_note_dialog: false,
             new_note_name: String::new(),
+            new_note_emoji: None,
             show_new_event_dialog: false,
             new_event_draft: EventDraft::new(today),
+            emoji_picker_target: None,
+            emoji_picker_search: String::new(),
+            new_folder_emoji: None,
             show_insert_table_dialog: false,
             insert_table_cols: 3,
             insert_table_rows: 3,
@@ -628,6 +648,9 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
                 let initial = format!("# {}\n\n", id.name());
                 match self.vault.create(id.clone(), &initial) {
                     Ok(_) => {
+                        if let Some(emoji) = self.new_note_emoji.take() {
+                            self.set_note_emoji(&id, Some(&emoji));
+                        }
                         self.link_index = LinkIndex::build(&self.vault);
                         self.open_note(id);
                         self.set_status(format!("Created {}", name));
@@ -692,6 +715,7 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
         self.link_index = LinkIndex::build(&self.vault);
         self.open_note(id);
         self.top_mode = TopBarMode::Notes;
+        self.sidebar_section = SidebarSection::Daily;
         self.set_status(format!("Opened daily note for {}", date));
     }
 
@@ -1073,10 +1097,14 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
             return Err(mybrain_core::Error::InvalidName("Cannot create folder with reserved name (Daily, Quick Notes)".into()));
         }
         self.vault.create_folder(&rel)?;
+        if let Some(emoji) = self.new_folder_emoji.take() {
+            self.set_folder_emoji(&rel, Some(&emoji));
+        }
         self.set_status(format!("Created folder: {rel}"));
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn shift_calendar_month(&mut self, delta: i32) {
         let year = self.calendar_view_date.year();
         let month = self.calendar_view_date.month() as i32;
@@ -1305,7 +1333,26 @@ mod tests {
         assert!(state.vault.get(&daily_id).is_some());
         assert_eq!(state.active_note.as_ref(), Some(&daily_id));
         assert_eq!(state.top_mode, TopBarMode::Notes);
+        assert_eq!(state.sidebar_section, SidebarSection::Daily);
         assert!(state.editor_buffer.contains("November 15, 2026"));
+    }
+
+    #[test]
+    fn test_create_folder_and_note_with_chosen_emoji() {
+        let (_tmp, mut state) = temp_app_state();
+        
+        // Create folder with chosen emoji
+        state.new_folder_emoji = Some("🚀".to_string());
+        state.create_folder(None, "DeepSpace").unwrap();
+        assert_eq!(state.get_folder_emoji("DeepSpace"), Some("🚀".to_string()));
+        assert_eq!(state.new_folder_emoji, None); // Cleared after use
+
+        // Create note with chosen emoji
+        state.new_note_emoji = Some("💡".to_string());
+        state.create_note("DeepSpace/Idea");
+        let note_id = NoteId::new("DeepSpace/Idea").unwrap();
+        assert_eq!(state.get_note_emoji(&note_id), Some("💡".to_string()));
+        assert_eq!(state.new_note_emoji, None); // Cleared after use
     }
 
     #[test]

@@ -132,14 +132,43 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
                 } else {
                     for (idx, id) in hits.iter().enumerate() {
                         let is_active = idx == state.command_palette_selected;
-                        let dot = theme::note_kind_color(id.as_str(), &t);
+                        let custom_color = state.get_note_color(id);
+                        let custom_emoji = state.get_note_emoji(id);
+                        let is_daily = state.is_daily_note(id);
+                        let is_event = state.is_event_note(id);
+
+                        let dot = custom_color.unwrap_or_else(|| {
+                            if is_event { t.warning }
+                            else if is_daily { t.accent }
+                            else { theme::note_kind_color(id.as_str(), &t) }
+                        });
+
+                        let display_name = if let Some(e) = custom_emoji {
+                            if id.name().starts_with(&e) {
+                                id.name().to_string()
+                            } else {
+                                format!("{e} {}", id.name())
+                            }
+                        } else if is_daily {
+                            format!("📅 {}", id.name())
+                        } else if is_event {
+                            format!("🔔 {}", id.name())
+                        } else {
+                            format!("📝 {}", id.name())
+                        };
+
+                        let folder_trail = id.folder().map(|f| {
+                            let folder_emoji = state.get_folder_emoji(f).unwrap_or_else(|| "📁".to_string());
+                            format!("{folder_emoji} {f}")
+                        });
+
                         let row_resp = theme::list_row(
                             ui,
                             &t,
                             is_active,
                             Some(dot),
-                            id.name(),
-                            id.folder(),
+                            &display_name,
+                            folder_trail.as_deref(),
                         );
 
                         if row_resp.clicked() {

@@ -776,8 +776,8 @@ pub fn top_mode_segmented(
             ui.spacing_mut().item_spacing.x = 2.0;
             ui.horizontal(|ui| {
                 let modes = [
-                    (TopBarMode::Notes, "Notes (Pencil) — Ctrl+1", "notes"),
-                    (TopBarMode::Calendar, "Calendar (Schedule) — Ctrl+2", "calendar"),
+                    (TopBarMode::Notes, "Notes (Editor) — Ctrl+1", "notes"),
+                    (TopBarMode::Calendar, "Calendar — Ctrl+2", "calendar"),
                     (TopBarMode::Graph, "Knowledge Graph — Ctrl+3", "graph"),
                 ];
 
@@ -816,6 +816,159 @@ pub fn top_mode_segmented(
             });
         });
     clicked
+}
+
+/// Actions triggered by the custom title bar window buttons.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowControlAction {
+    Minimize,
+    MaximizeToggle,
+    Close,
+}
+
+/// Paint a clean vector minimize icon (horizontal bar).
+pub fn paint_window_minimize_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let center = rect.center();
+    let y = center.y + 0.5;
+    painter.line_segment(
+        [pos2(center.x - 5.0, y), pos2(center.x + 5.0, y)],
+        Stroke::new(1.3, color),
+    );
+}
+
+/// Paint a clean vector maximize / restore icon.
+pub fn paint_window_maximize_icon(
+    painter: &egui::Painter,
+    rect: Rect,
+    color: Color32,
+    bg_color: Color32,
+    is_maximized: bool,
+) {
+    let center = rect.center();
+    if is_maximized {
+        // Restore icon: two overlapping squares
+        let back_rect = Rect::from_center_size(center + vec2(1.5, -1.5), vec2(7.5, 7.5));
+        painter.rect_stroke(back_rect, CornerRadius::ZERO, Stroke::new(1.1, color), egui::StrokeKind::Inside);
+        let front_rect = Rect::from_center_size(center + vec2(-1.5, 1.5), vec2(7.5, 7.5));
+        painter.rect_filled(front_rect, CornerRadius::ZERO, bg_color);
+        painter.rect_stroke(front_rect, CornerRadius::ZERO, Stroke::new(1.1, color), egui::StrokeKind::Inside);
+    } else {
+        // Maximize icon: single square
+        let box_rect = Rect::from_center_size(center, vec2(9.0, 9.0));
+        painter.rect_stroke(box_rect, CornerRadius::ZERO, Stroke::new(1.2, color), egui::StrokeKind::Inside);
+    }
+}
+
+/// Paint a clean vector close icon (✕).
+pub fn paint_window_close_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let center = rect.center();
+    let span = 4.2;
+    let stroke = Stroke::new(1.25, color);
+    painter.line_segment(
+        [
+            pos2(center.x - span, center.y - span),
+            pos2(center.x + span, center.y + span),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            pos2(center.x - span, center.y + span),
+            pos2(center.x + span, center.y - span),
+        ],
+        stroke,
+    );
+}
+
+/// Render the trio of custom window control buttons (Close, Maximize/Restore, Minimize).
+///
+/// Designed to be called inside a `Layout::right_to_left` layout so Close is rightmost,
+/// followed by Maximize, then Minimize.
+pub fn window_control_buttons_rtl(
+    ui: &mut Ui,
+    t: &Tokens,
+    is_maximized: bool,
+) -> Option<WindowControlAction> {
+    let mut action = None;
+    let btn_size = vec2(32.0, 26.0);
+    let radius = CornerRadius::same(t.radius_sm as u8);
+
+    // 1. Close button (first in right_to_left -> rightmost position)
+    let (close_rect, close_resp) = ui.allocate_exact_size(btn_size, Sense::click());
+    if ui.is_rect_visible(close_rect) {
+        let p = ui.painter();
+        let close_danger = Color32::from_rgb(226, 45, 60);
+        let close_pressed = Color32::from_rgb(186, 32, 45);
+        let bg = if close_resp.is_pointer_button_down_on() {
+            close_pressed
+        } else if close_resp.hovered() {
+            close_danger
+        } else {
+            Color32::TRANSPARENT
+        };
+        if bg != Color32::TRANSPARENT {
+            p.rect_filled(close_rect, radius, bg);
+        }
+        let icon_color = if close_resp.hovered() {
+            Color32::WHITE
+        } else {
+            t.text_dim
+        };
+        paint_window_close_icon(p, close_rect, icon_color);
+    }
+    if close_resp.on_hover_text("Close Window").clicked() {
+        action = Some(WindowControlAction::Close);
+    }
+
+    ui.add_space(2.0);
+
+    // 2. Maximize / Restore button (middle position)
+    let (max_rect, max_resp) = ui.allocate_exact_size(btn_size, Sense::click());
+    if ui.is_rect_visible(max_rect) {
+        let p = ui.painter();
+        let bg = if max_resp.is_pointer_button_down_on() {
+            t.pressed
+        } else if max_resp.hovered() {
+            t.hover
+        } else {
+            Color32::TRANSPARENT
+        };
+        if bg != Color32::TRANSPARENT {
+            p.rect_filled(max_rect, radius, bg);
+        }
+        let icon_color = if max_resp.hovered() { t.text } else { t.text_dim };
+        let fill_bg = if bg != Color32::TRANSPARENT { bg } else { t.chrome };
+        paint_window_maximize_icon(p, max_rect, icon_color, fill_bg, is_maximized);
+    }
+    let max_tip = if is_maximized { "Restore Window" } else { "Maximize Window" };
+    if max_resp.on_hover_text(max_tip).clicked() {
+        action = Some(WindowControlAction::MaximizeToggle);
+    }
+
+    ui.add_space(2.0);
+
+    // 3. Minimize button (leftmost of the window control trio)
+    let (min_rect, min_resp) = ui.allocate_exact_size(btn_size, Sense::click());
+    if ui.is_rect_visible(min_rect) {
+        let p = ui.painter();
+        let bg = if min_resp.is_pointer_button_down_on() {
+            t.pressed
+        } else if min_resp.hovered() {
+            t.hover
+        } else {
+            Color32::TRANSPARENT
+        };
+        if bg != Color32::TRANSPARENT {
+            p.rect_filled(min_rect, radius, bg);
+        }
+        let icon_color = if min_resp.hovered() { t.text } else { t.text_dim };
+        paint_window_minimize_icon(p, min_rect, icon_color);
+    }
+    if min_resp.on_hover_text("Minimize Window").clicked() {
+        action = Some(WindowControlAction::Minimize);
+    }
+
+    action
 }
 
 /// Clickable pushpin button that never produces tofu.

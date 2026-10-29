@@ -82,6 +82,26 @@ pub fn show_new_note(ctx: &egui::Context, state: &mut AppState) {
             );
         }
 
+        ui.add_space(8.0);
+        ui.label(RichText::new("Note Emoji / Icon:").color(t.text_dim).size(12.0));
+        ui.horizontal_wrapped(|ui| {
+            let current_emoji = state.new_note_emoji.as_deref().unwrap_or("📝");
+            ui.label(RichText::new(current_emoji).size(16.0));
+            ui.add_space(4.0);
+            for em in ["📝", "📄", "💡", "🚀", "⭐", "📌", "🎯", "🔍", "🏷️", "💼", "📚", "🎨"] {
+                if ui.button(em).clicked() {
+                    state.new_note_emoji = Some(em.to_string());
+                }
+            }
+            if ui.button("More… 🔍").clicked() {
+                state.emoji_picker_target = Some(crate::state::EmojiPickerTarget::NewNoteDialog);
+                state.emoji_picker_search.clear();
+            }
+            if state.new_note_emoji.is_some() && ui.button("× Reset").clicked() {
+                state.new_note_emoji = None;
+            }
+        });
+
         ui.add_space(14.0);
 
         ui.horizontal(|ui| {
@@ -347,6 +367,26 @@ pub fn show_new_folder(ctx: &egui::Context, state: &mut AppState) {
                     .size(11.5),
             );
         }
+
+        ui.add_space(8.0);
+        ui.label(RichText::new("Folder Emoji / Icon:").color(t.text_dim).size(12.0));
+        ui.horizontal_wrapped(|ui| {
+            let current_emoji = state.new_folder_emoji.as_deref().unwrap_or("📁");
+            ui.label(RichText::new(current_emoji).size(16.0));
+            ui.add_space(4.0);
+            for em in ["📁", "📂", "🚀", "💡", "💼", "📚", "🎨", "🛠️", "🎯", "🏷️", "📦", "🌟"] {
+                if ui.button(em).clicked() {
+                    state.new_folder_emoji = Some(em.to_string());
+                }
+            }
+            if ui.button("More… 🔍").clicked() {
+                state.emoji_picker_target = Some(crate::state::EmojiPickerTarget::NewFolderDialog);
+                state.emoji_picker_search.clear();
+            }
+            if state.new_folder_emoji.is_some() && ui.button("× Reset").clicked() {
+                state.new_folder_emoji = None;
+            }
+        });
 
         ui.add_space(12.0);
         ui.horizontal(|ui| {

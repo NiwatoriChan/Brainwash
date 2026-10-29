@@ -104,18 +104,46 @@ impl BrainwashApp {
         });
     }
 
-    /// Single application header: brand, mode switcher (Notes | Graph), search, and global actions.
-    fn top_bar(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context, t: &Tokens) {
+    /// Single application header: fused custom title bar with brand, mode switcher, search, global actions, and window controls.
+    fn top_bar(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame, t: &Tokens) {
         egui::Panel::top("top_bar")
-            .exact_size(48.0)
+            .exact_size(44.0)
             .frame(
                 Frame::NONE
                     .fill(t.chrome)
-                    .inner_margin(Margin::symmetric(14, 0)),
+                    .inner_margin(Margin { left: 10, right: 8, top: 0, bottom: 0 }),
             )
             .show(ui, |ui| {
-                theme::bottom_hairline(ui, ui.max_rect(), t);
+                let top_bar_rect = ui.max_rect();
+                theme::bottom_hairline(ui, top_bar_rect, t);
+
+                // Fused custom title bar window drag and double-click to toggle maximize
+                let title_bar_response = ui.interact(
+                    top_bar_rect,
+                    ui.scope_id().with("fused_title_bar_drag_handle"),
+                    Sense::click_and_drag(),
+                );
+
+                if title_bar_response.double_clicked() {
+                    let is_max = ui.input(|i| i.viewport().maximized.unwrap_or(false));
+                    ui.send_viewport_cmd(egui::ViewportCommand::Maximized(!is_max));
+                } else if title_bar_response.drag_started_by(egui::PointerButton::Primary) {
+                    ui.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                }
+
+                #[cfg(target_os = "macos")]
+                {
+                    _frame.set_traffic_lights_position(
+                        ui.ctx(),
+                        top_bar_rect.y_range(),
+                        14.0,
+                    );
+                }
+
                 ui.horizontal_centered(|ui| {
+                    #[cfg(target_os = "macos")]
+                    ui.add_space(68.0); // Offset for macOS native traffic lights
+
                     // Sidebar toggle button
                     if theme::icon_sidebar_button(ui, t, self.state.show_sidebar)
                         .on_hover_text("Toggle Sidebar (Ctrl+B)")
@@ -145,7 +173,7 @@ impl BrainwashApp {
 
                     ui.add_space(10.0);
 
-                    // Top Mode Icon Switcher: Notes (Pencil), Calendar, Graph, Canvas
+                    // Top Mode Icon Switcher: Notes (Pencil), Calendar, Graph
                     if let Some(sel) = theme::top_mode_segmented(ui, t, self.state.top_mode) {
                         self.state.top_mode = sel;
                     }
@@ -153,7 +181,7 @@ impl BrainwashApp {
                     ui.add_space(12.0);
 
                     // Search field-styled button that opens the command palette
-                    let search_w = (ui.available_width() - 330.0).clamp(140.0, 360.0);
+                    let search_w = (ui.available_width() - 440.0).clamp(140.0, 340.0);
                     let (rect, resp) =
                         ui.allocate_exact_size(egui::vec2(search_w, 28.0), Sense::click());
                     let hovered = resp.hovered();
@@ -189,6 +217,30 @@ impl BrainwashApp {
                     }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Custom window control buttons on non-macOS platforms
+                        #[cfg(not(target_os = "macos"))]
+                        {
+                            let is_max = ui.input(|i| i.viewport().maximized.unwrap_or(false));
+                            if let Some(action) = theme::window_control_buttons_rtl(ui, t, is_max) {
+                                match action {
+                                    theme::WindowControlAction::Minimize => {
+                                        ui.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                                    }
+                                    theme::WindowControlAction::MaximizeToggle => {
+                                        ui.send_viewport_cmd(egui::ViewportCommand::Maximized(!is_max));
+                                    }
+                                    theme::WindowControlAction::Close => {
+                                        ui.send_viewport_cmd(egui::ViewportCommand::Close);
+                                    }
+                                }
+                            }
+
+                            ui.add_space(6.0);
+                            let (sep_rect, _) = ui.allocate_exact_size(egui::vec2(1.0, 16.0), Sense::hover());
+                            ui.painter().rect_filled(sep_rect, CornerRadius::ZERO, t.separator);
+                            ui.add_space(6.0);
+                        }
+
                         // Connections panel toggle
                         let links_text = RichText::new("Links").color(if self.state.show_backlinks {
                             t.accent_text
@@ -328,13 +380,13 @@ fn menu_item(ui: &mut egui::Ui, t: &Tokens, label: &str, shortcut: &str) -> bool
 }
 
 impl eframe::App for BrainwashApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.handle_keyboard_shortcuts(&ctx);
 
         let tokens = Tokens::get(&ctx);
 
-        self.top_bar(ui, &ctx, &tokens);
+        self.top_bar(ui, frame, &tokens);
         self.status_bar(ui, &ctx, &tokens);
 
         // Left Sidebar: collapsible note explorer & sections
@@ -417,6 +469,7 @@ impl eframe::App for BrainwashApp {
         views::dialogs::show_insert_image(&ctx, &mut self.state);
         views::settings_dialog::show(&ctx, &mut self.state);
         views::vault_switcher::show(&ctx, &mut self.state);
+        views::emoji_picker::show(&ctx, &mut self.state);
 
         // Drag-and-drop preview tooltip & unconsumed cleanup
         if let Some(dragged) = egui::DragAndDrop::payload::<crate::state::DraggedNote>(&ctx) {
@@ -454,6 +507,8 @@ impl eframe::App for BrainwashApp {
         if ctx.input(|i| i.pointer.any_released()) {
             let _ = egui::DragAndDrop::take_payload::<crate::state::DraggedNote>(&ctx);
         }
+
+        handle_window_frame_and_resize(&ctx, &tokens);
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
@@ -463,6 +518,67 @@ impl eframe::App for BrainwashApp {
         eframe::set_value(storage, KEY_SHOW_SIDEBAR, &self.state.show_sidebar);
         eframe::set_value(storage, KEY_TOP_MODE, &self.state.top_mode);
         eframe::set_value(storage, KEY_SIDEBAR_SECTION, &self.state.sidebar_section);
+    }
+}
+
+/// Draw a subtle 1px border around the borderless window and handle edge resizing.
+fn handle_window_frame_and_resize(ctx: &egui::Context, t: &Tokens) {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let is_maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
+        let screen_rect = ctx.viewport_rect();
+
+        // 1. Draw crisp outer 1px window border when not maximized so borderless window looks defined
+        if !is_maximized {
+            ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("custom_window_border")))
+                .rect_stroke(
+                    screen_rect,
+                    CornerRadius::same(6),
+                    Stroke::new(1.0, t.separator),
+                    egui::StrokeKind::Inside,
+                );
+        }
+
+        // 2. Custom border resize handles (only active when window is not maximized)
+        if !is_maximized {
+            if let Some(pos) = ctx.input(|i| i.pointer.latest_pos()) {
+                let border_thick = 6.0;
+                let near_left = pos.x <= screen_rect.left() + border_thick && pos.x >= screen_rect.left() - 2.0;
+                let near_right = pos.x >= screen_rect.right() - border_thick && pos.x <= screen_rect.right() + 2.0;
+                let near_top = pos.y <= screen_rect.top() + border_thick && pos.y >= screen_rect.top() - 2.0;
+                let near_bottom = pos.y >= screen_rect.bottom() - border_thick && pos.y <= screen_rect.bottom() + 2.0;
+
+                let in_y = pos.y >= screen_rect.top() && pos.y <= screen_rect.bottom();
+                let in_x = pos.x >= screen_rect.left() && pos.x <= screen_rect.right();
+
+                let resize_info = if near_top && near_left {
+                    Some((egui::viewport::ResizeDirection::NorthWest, CursorIcon::ResizeNorthWest))
+                } else if near_top && near_right {
+                    Some((egui::viewport::ResizeDirection::NorthEast, CursorIcon::ResizeNorthEast))
+                } else if near_bottom && near_left {
+                    Some((egui::viewport::ResizeDirection::SouthWest, CursorIcon::ResizeSouthWest))
+                } else if near_bottom && near_right {
+                    Some((egui::viewport::ResizeDirection::SouthEast, CursorIcon::ResizeSouthEast))
+                } else if near_top && in_x {
+                    Some((egui::viewport::ResizeDirection::North, CursorIcon::ResizeNorth))
+                } else if near_bottom && in_x {
+                    Some((egui::viewport::ResizeDirection::South, CursorIcon::ResizeSouth))
+                } else if near_left && in_y {
+                    Some((egui::viewport::ResizeDirection::West, CursorIcon::ResizeWest))
+                } else if near_right && in_y {
+                    Some((egui::viewport::ResizeDirection::East, CursorIcon::ResizeEast))
+                } else {
+                    None
+                };
+
+                if let Some((dir, cursor)) = resize_info {
+                    ctx.set_cursor_icon(cursor);
+                    if ctx.input(|i| i.pointer.primary_down()) {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(dir));
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -487,11 +603,22 @@ fn main() -> eframe::Result {
         }
     };
 
+    let viewport = egui::ViewportBuilder::default()
+        .with_title("Brainwash")
+        .with_inner_size([1280.0, 820.0])
+        .with_min_inner_size([760.0, 480.0]);
+
+    #[cfg(target_os = "macos")]
+    let viewport = viewport
+        .with_fullsize_content_view(true)
+        .with_titlebar_shown(false)
+        .with_title_shown(false);
+
+    #[cfg(not(target_os = "macos"))]
+    let viewport = viewport.with_decorations(false);
+
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("Brainwash")
-            .with_inner_size([1280.0, 820.0])
-            .with_min_inner_size([760.0, 480.0]),
+        viewport,
         ..Default::default()
     };
 

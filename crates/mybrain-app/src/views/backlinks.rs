@@ -45,15 +45,36 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
         if backlinks.is_empty() {
             ui.label(RichText::new("No incoming backlinks").color(t.text_faint).size(11.5));
-        } else {
             for bl in backlinks {
                 let source_id = bl.source.clone();
+                let source_color = state.get_note_color(&source_id);
+                let source_emoji = state.get_note_emoji(&source_id);
+                let is_daily = state.is_daily_note(&source_id);
+                let is_event = state.is_event_note(&source_id);
+
+                let dot_col = source_color.unwrap_or_else(|| {
+                    if is_event { t.warning }
+                    else if is_daily { t.accent }
+                    else { theme::note_kind_color(source_id.as_str(), &t) }
+                });
+                let icon_str = if let Some(e) = &source_emoji {
+                    e.as_str()
+                } else if is_daily {
+                    "📅"
+                } else if is_event {
+                    "🔔"
+                } else {
+                    "📝"
+                };
+
                 let card = theme::card_frame(&t, false)
                     .inner_margin(Margin::same(8));
 
                 card.show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("←").strong().color(t.accent));
+                        let (dot_rect, _) = ui.allocate_exact_size(egui::vec2(6.0, 6.0), egui::Sense::hover());
+                        ui.painter().circle_filled(dot_rect.center(), 3.0, dot_col);
+                        ui.label(RichText::new(icon_str).size(12.0));
                         if ui.button(RichText::new(source_id.name()).strong().color(t.text)).clicked() {
                             note_to_open = Some(source_id);
                         }
@@ -84,6 +105,29 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             for out in outgoing {
                 let target = out.link.target.clone();
                 let is_resolved = out.resolved.is_some();
+                let resolved_id = out.resolved.as_ref();
+                let custom_color = resolved_id.and_then(|id| state.get_note_color(id));
+                let custom_emoji = resolved_id.and_then(|id| state.get_note_emoji(id));
+                let is_daily = resolved_id.map(|id| state.is_daily_note(id)).unwrap_or(false);
+                let is_event = resolved_id.map(|id| state.is_event_note(id)).unwrap_or(false);
+
+                let dot_col = custom_color.unwrap_or_else(|| {
+                    if is_event { t.warning }
+                    else if is_daily { t.accent }
+                    else if is_resolved { t.accent_text }
+                    else { t.text_faint }
+                });
+                let icon_str = if let Some(e) = &custom_emoji {
+                    e.as_str()
+                } else if is_daily {
+                    "📅"
+                } else if is_event {
+                    "🔔"
+                } else if is_resolved {
+                    "📝"
+                } else {
+                    "❓"
+                };
 
                 Frame::NONE
                     .fill(t.card)
@@ -92,12 +136,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     .inner_margin(Margin::symmetric(8, 4))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            let (icon, color) = if is_resolved {
-                                ("→", t.accent_text)
-                            } else {
-                                ("?", t.warning)
-                            };
-                            ui.label(RichText::new(icon).strong().color(color));
+                            let (dot_rect, _) = ui.allocate_exact_size(egui::vec2(6.0, 6.0), egui::Sense::hover());
+                            ui.painter().circle_filled(dot_rect.center(), 3.0, dot_col);
+                            ui.label(RichText::new(icon_str).size(12.0));
 
                             let text = RichText::new(out.link.display_text()).color(if is_resolved {
                                 t.text
@@ -105,14 +146,16 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                                 t.warning
                             });
 
-                            if ui.button(text).clicked() {
-                                note_to_create = Some(target);
-                            }
-
-                            if !is_resolved {
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    theme::pill(ui, "uncreated", t.warning, t.accent_soft);
-                                });
+                            if is_resolved {
+                                if ui.button(text).clicked() {
+                                    if let Some(res) = &out.resolved {
+                                        note_to_open = Some(res.clone());
+                                    }
+                                }
+                            } else {
+                                if ui.button(text).on_hover_text("Unresolved link - click to create").clicked() {
+                                    note_to_create = Some(target);
+                                }
                             }
                         });
                     });

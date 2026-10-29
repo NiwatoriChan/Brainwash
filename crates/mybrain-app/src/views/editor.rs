@@ -132,6 +132,46 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         },
                     );
 
+                    // Clickable Note Emoji icon
+                    let note_emoji = state.get_note_emoji(&active_id);
+                    let is_daily = state.is_daily_note(&active_id);
+                    let is_event = state.is_event_note(&active_id);
+                    let default_icon = if is_daily { "📅" } else if is_event { "🔔" } else { "📝" };
+                    let current_icon = note_emoji.as_deref().unwrap_or(default_icon);
+
+                    ui.menu_button(
+                        RichText::new(current_icon).size(14.0),
+                        |ui| {
+                            ui.set_min_width(200.0);
+                            ui.label(RichText::new("Quick Emojis:").size(11.0).color(t.text_faint));
+                            ui.horizontal_wrapped(|ui| {
+                                for em in ["📝", "📄", "💡", "🚀", "⭐", "📌", "🎯", "🔍", "🏷️", "💼", "📚", "🎨", "⚙️", "🌿", "⚡", "💬", "🧪", "📅"] {
+                                    if ui.button(em).clicked() {
+                                        state.set_note_emoji(&active_id, Some(em));
+                                        ui.close();
+                                    }
+                                }
+                            });
+                            ui.separator();
+                            if ui.button("🔍 More Emojis…").clicked() {
+                                state.emoji_picker_target = Some(crate::state::EmojiPickerTarget::Note(active_id.clone()));
+                                state.emoji_picker_search.clear();
+                                ui.close();
+                            }
+                            if ui.button("Reset / Clear Emoji").clicked() {
+                                state.set_note_emoji(&active_id, None);
+                                ui.close();
+                            }
+                        },
+                    );
+
+                    // Folder trail breadcrumb if note is in a folder
+                    if let Some(folder) = active_id.folder() {
+                        let folder_emoji = state.get_folder_emoji(folder).unwrap_or_else(|| "📁".to_string());
+                        ui.label(RichText::new(format!("{folder_emoji} {folder} /")).color(t.text_faint).size(13.0));
+                    }
+
+                    // Title
                     ui.label(RichText::new(active_id.name()).color(t.text).strong().size(15.0));
 
                     // Daily Note badge & jump to Calendar
@@ -151,11 +191,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         }
 
                         if theme::ghost_button(ui, &t, RichText::new("Calendar ↗").size(11.5).color(t.accent_text))
-                            .on_hover_text("View in Daily Calendar")
+                            .on_hover_text("Open Full Calendar View (Ctrl+2)")
                             .clicked()
                         {
                             state.selected_daily_date = daily_date;
-                            state.sidebar_section = crate::state::SidebarSection::Daily;
+                            state.calendar_view_date = daily_date;
+                            state.top_mode = crate::state::TopBarMode::Calendar;
                         }
                     }
 
@@ -399,7 +440,29 @@ fn render_link_autocomplete(
                         theme::section_label(ui, t, "Link to note");
                         ui.add_space(2.0);
                         for note_name in matches {
-                            if theme::list_row(ui, t, false, Some(t.accent), &format!("[[{note_name}]]"), None).clicked() {
+                            let note_id = mybrain_core::NoteId::new(&note_name).ok();
+                            let custom_color = note_id.as_ref().and_then(|id| state.get_note_color(id));
+                            let custom_emoji = note_id.as_ref().and_then(|id| state.get_note_emoji(id));
+                            let is_daily = note_id.as_ref().map(|id| state.is_daily_note(id)).unwrap_or(false);
+                            let is_event = note_id.as_ref().map(|id| state.is_event_note(id)).unwrap_or(false);
+
+                            let dot = custom_color.unwrap_or_else(|| {
+                                if is_event { t.warning }
+                                else if is_daily { t.accent }
+                                else { theme::note_kind_color(&note_name, t) }
+                            });
+                            let icon = if let Some(e) = custom_emoji {
+                                e
+                            } else if is_daily {
+                                "📅".to_string()
+                            } else if is_event {
+                                "🔔".to_string()
+                            } else {
+                                "📝".to_string()
+                            };
+
+                            let display = format!("{icon} [[{note_name}]]");
+                            if theme::list_row(ui, t, false, Some(dot), &display, None).clicked() {
                                 chosen_note = Some(note_name);
                             }
                         }
@@ -1431,10 +1494,19 @@ fn render_tab_bar(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
                                 ui.painter().circle_filled(rect.center(), 3.5, t.accent);
                             }
 
-                            // Custom emoji if assigned
-                            if let Some(emoji) = &note_emoji {
-                                ui.label(RichText::new(emoji).size(12.0));
-                            }
+                            // Custom emoji if assigned, or daily/event/note icon
+                            let is_tab_daily = state.is_daily_note(tab_id);
+                            let is_tab_event = state.is_event_note(tab_id);
+                            let tab_icon = if let Some(emoji) = &note_emoji {
+                                emoji.as_str()
+                            } else if is_tab_daily {
+                                "📅"
+                            } else if is_tab_event {
+                                "🔔"
+                            } else {
+                                "📝"
+                            };
+                            ui.label(RichText::new(tab_icon).size(12.0));
 
                             // Tab title
                             let text_color = if is_active { t.text } else { t.text_dim };
