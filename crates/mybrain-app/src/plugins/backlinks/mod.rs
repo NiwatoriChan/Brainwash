@@ -5,7 +5,7 @@ use mybrain_core::index::LinkIndex;
 use mybrain_core::NoteId;
 
 use crate::plugins::{
-    MyBrainPlugin, PluginCommand, PluginContext, PluginViewType, RibbonButton, RibbonSlot,
+    MyBrainPlugin, PluginCommand, PluginContext, PluginViewType, RibbonButton,
 };
 use crate::theme::{self, Tokens};
 
@@ -36,29 +36,31 @@ impl MyBrainPlugin for BacklinksPlugin {
         "Inspect incoming backlinks, outgoing wiki-links, and unresolved links for the active note"
     }
 
+    fn view_type(&self) -> PluginViewType {
+        PluginViewType::RightPanel
+    }
+
     fn ribbon_button(&self) -> Option<RibbonButton> {
-        Some(RibbonButton {
-            icon: "🔗",
-            tooltip: "Toggle Connections Panel",
-            slot: RibbonSlot::Top,
-            view_type: PluginViewType::SidePanel,
-            priority: 80,
-        })
+        None
     }
 
     fn commands(&self) -> Vec<PluginCommand> {
         vec![PluginCommand {
             id: "toggle_backlinks".into(),
             title: "Toggle Connections & Backlinks Panel".into(),
-            shortcut: None,
+            shortcut: Some("Ctrl+Shift+B".into()),
             plugin_id: "core.backlinks",
         }]
     }
 
     fn execute_command(&mut self, command_id: &str, ctx: &mut PluginContext) {
         if command_id == "toggle_backlinks" {
-            ctx.toggle_side_panel("core.backlinks");
+            ctx.toggle_right_panel("core.backlinks");
         }
+    }
+
+    fn render_right_panel(&mut self, ui: &mut Ui, ctx: &mut PluginContext) {
+        self.render_side_panel(ui, ctx);
     }
 
     fn render_side_panel(&mut self, ui: &mut Ui, ctx: &mut PluginContext) {
@@ -72,7 +74,7 @@ impl MyBrainPlugin for BacklinksPlugin {
                     .on_hover_text("Hide connections panel")
                     .clicked()
                 {
-                    ctx.toggle_side_panel("core.backlinks");
+                    ctx.toggle_right_panel("core.backlinks");
                 }
             });
         });

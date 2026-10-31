@@ -37,6 +37,7 @@ pub fn render_settings_modal(
     registry: &mut PluginRegistry,
     active_main: &mut Option<String>,
     active_side: &mut Option<String>,
+    active_right: &mut Option<String>,
     ctx: &mut PluginContext,
     settings_path: &Path,
 ) {
@@ -303,6 +304,7 @@ pub fn render_settings_modal(
                                         let type_str = match info.view_type {
                                             PluginViewType::MainWorkspace => "Main Workspace",
                                             PluginViewType::SidePanel => "Side Panel",
+                                            PluginViewType::RightPanel => "Right Panel",
                                             PluginViewType::ModalOverlay => "Modal Dialog",
                                             PluginViewType::Background => "Background",
                                         };
@@ -357,6 +359,9 @@ pub fn render_settings_modal(
             }
             if active_side.as_deref() == Some(&id) {
                 *active_side = None;
+            }
+            if active_right.as_deref() == Some(&id) {
+                *active_right = None;
             }
             ctx.toast(format!("Disabled plugin: {id}"));
         }

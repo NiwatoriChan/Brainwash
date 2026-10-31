@@ -36,6 +36,7 @@ pub struct AppShell {
 
     pub active_main_plugin: Option<String>,
     pub active_side_plugin: Option<String>,
+    pub active_right_plugin: Option<String>,
     pub active_note: Option<NoteId>,
 
     pub status: Option<(String, Instant)>,
@@ -81,6 +82,12 @@ impl AppShell {
             None
         };
 
+        let active_right = if settings.is_plugin_enabled("core.backlinks") {
+            Some("core.backlinks".to_string())
+        } else {
+            None
+        };
+
         Ok(Self {
             vault,
             index,
@@ -91,6 +98,7 @@ impl AppShell {
             plugins,
             active_main_plugin: active_main,
             active_side_plugin: active_side,
+            active_right_plugin: active_right,
             active_note: None,
             status: None,
             command_palette_state: CommandPaletteState::default(),
@@ -307,6 +315,13 @@ impl AppShell {
                         self.active_side_plugin = Some(id.clone());
                     }
                 }
+                AppEvent::ToggleRightPanel(id) => {
+                    if self.active_right_plugin.as_deref() == Some(id) {
+                        self.active_right_plugin = None;
+                    } else if self.plugins.is_enabled(id) {
+                        self.active_right_plugin = Some(id.clone());
+                    }
+                }
                 AppEvent::OpenModal(name) => {
                     if name == "settings" {
                         self.show_settings_dialog = true;
@@ -358,6 +373,11 @@ impl AppShell {
                         self.active_main_plugin = Some("core.markdown".into());
                     }
                 }
+                AppEvent::RequestOpenCanvas(_) => {
+                    if self.plugins.is_enabled("core.canvas") {
+                        self.active_main_plugin = Some("core.canvas".into());
+                    }
+                }
                 AppEvent::NoteDeleted(id) => {
                     if self.active_note.as_ref() == Some(id) {
                         self.active_note = None;
@@ -390,8 +410,16 @@ impl AppShell {
             if i.modifiers.command && i.key_pressed(egui::Key::P) {
                 self.command_palette_state.is_open = !self.command_palette_state.is_open;
             }
-            // Ctrl+B: Toggle Side Panel
-            if i.modifiers.command && (i.key_pressed(egui::Key::B) || i.key_pressed(egui::Key::Backslash)) {
+            // Ctrl+Shift+B: Toggle Right Panel (Connections)
+            if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::B) {
+                if self.active_right_plugin.is_some() {
+                    self.active_right_plugin = None;
+                } else if self.plugins.is_enabled("core.backlinks") {
+                    self.active_right_plugin = Some("core.backlinks".into());
+                }
+            }
+            // Ctrl+B: Toggle Left Side Panel
+            if i.modifiers.command && !i.modifiers.shift && (i.key_pressed(egui::Key::B) || i.key_pressed(egui::Key::Backslash)) {
                 if self.active_side_plugin.is_some() {
                     self.active_side_plugin = None;
                 } else if self.plugins.is_enabled("core.explorer") {
@@ -609,6 +637,26 @@ impl AppShell {
 
                         ui.add_space(4.0);
 
+                        // Connections right panel toggle button
+                        let is_right_open = self.active_right_plugin.is_some();
+                        let conn_color = if is_right_open { t.accent_text } else { t.text_dim };
+                        if theme::ghost_button(
+                            ui,
+                            t,
+                            RichText::new(if is_right_open { "🔗 Connections ●" } else { "🔗 Connections" }).color(conn_color),
+                        )
+                        .on_hover_text("Toggle Connections & Backlinks right panel (Ctrl+Shift+B)")
+                        .clicked()
+                        {
+                            if self.active_right_plugin.is_some() {
+                                self.active_right_plugin = None;
+                            } else if self.plugins.is_enabled("core.backlinks") {
+                                self.active_right_plugin = Some("core.backlinks".into());
+                            }
+                        }
+
+                        ui.add_space(4.0);
+
                         // New Note button
                         if ui
                             .add(
@@ -751,6 +799,7 @@ impl eframe::App for AppShell {
                     &self.plugins,
                     self.active_main_plugin.as_deref(),
                     self.active_side_plugin.as_deref(),
+                    self.active_right_plugin.as_deref(),
                     &tokens,
                 )
             })
@@ -761,6 +810,13 @@ impl eframe::App for AppShell {
                 self.active_side_plugin = None;
             } else {
                 self.active_side_plugin = Some(side);
+            }
+        }
+        if let Some(right) = ribbon_action.toggle_right {
+            if self.active_right_plugin.as_deref() == Some(&right) {
+                self.active_right_plugin = None;
+            } else {
+                self.active_right_plugin = Some(right);
             }
         }
         if let Some(main) = ribbon_action.switch_main {
@@ -779,7 +835,7 @@ impl eframe::App for AppShell {
             self.show_settings_dialog = true;
         }
 
-        // 2. Collapsible Side Panel (only visible if active_side_plugin is Some and enabled)
+        // 2. Collapsible Left Side Panel (only visible if active_side_plugin is Some and enabled)
         if let Some(ref side_id) = self.active_side_plugin.clone() {
             if self.plugins.is_enabled(side_id) {
                 egui::Panel::left("shell_side_panel")
@@ -808,7 +864,37 @@ impl eframe::App for AppShell {
             }
         }
 
-        // 3. Central Main Workspace
+        // 3. Collapsible Right Panel (Connections & Backlinks)
+        if let Some(ref right_id) = self.active_right_plugin.clone() {
+            if self.plugins.is_enabled(right_id) {
+                egui::Panel::right("shell_right_panel")
+                    .default_size(280.0)
+                    .min_size(200.0)
+                    .max_size(480.0)
+                    .resizable(true)
+                    .frame(
+                        Frame::NONE
+                            .fill(tokens.dock)
+                            .stroke(Stroke::new(1.0, tokens.separator))
+                            .inner_margin(Margin::symmetric(10, 12)),
+                    )
+                    .show(ui, |ui| {
+                        let mut p_ctx = PluginContext {
+                            vault: &mut self.vault,
+                            index: &mut self.index,
+                            settings: &mut self.settings,
+                            theme_kind: &mut self.theme_kind,
+                            event_bus: &mut self.event_bus,
+                            active_note: self.active_note.as_ref(),
+                        };
+                        if let Some(entry) = self.plugins.get_plugin_mut(right_id) {
+                            entry.render_right_panel(ui, &mut p_ctx);
+                        }
+                    });
+            }
+        }
+
+        // 4. Central Main Workspace
         egui::CentralPanel::default()
             .frame(Frame::NONE.fill(tokens.canvas).inner_margin(Margin::ZERO))
             .show(ui, |ui| {
@@ -835,7 +921,7 @@ impl eframe::App for AppShell {
                 }
             });
 
-        // 4. Modals and Dialogs
+        // 5. Modals and Dialogs
         let mut switch_vault_req = None;
         {
             let mut p_ctx = PluginContext {
@@ -865,6 +951,7 @@ impl eframe::App for AppShell {
                 &mut self.plugins,
                 &mut self.active_main_plugin,
                 &mut self.active_side_plugin,
+                &mut self.active_right_plugin,
                 &mut p_ctx,
                 &self.settings_path,
             );
@@ -1076,10 +1163,16 @@ mod tests {
     #[test]
     fn test_plugin_dynamic_enable_disable_and_fallback() {
         let (_tmp, mut shell) = temp_app_shell();
-        assert!(shell.plugins.is_enabled("core.markdown"));
-        assert_eq!(shell.active_main_plugin.as_deref(), Some("core.markdown"));
+        assert!(shell.plugins.is_enabled("core.quick_note"));
 
-        // Disable markdown plugin dynamically
+        // By default, markdown and canvas do NOT have ribbon buttons
+        let initial_buttons = shell.plugins.enabled_ribbon_buttons();
+        assert!(!initial_buttons.iter().any(|(id, _)| *id == "core.markdown" || *id == "core.canvas"));
+        // But quick_note, explorer, backlinks DO have ribbon buttons
+        assert!(initial_buttons.iter().any(|(id, _)| *id == "core.quick_note"));
+        assert!(initial_buttons.iter().any(|(id, _)| *id == "core.backlinks"));
+
+        // Disable quick_note plugin dynamically
         let mut p_ctx = PluginContext {
             vault: &mut shell.vault,
             index: &mut shell.index,
@@ -1088,18 +1181,18 @@ mod tests {
             event_bus: &mut shell.event_bus,
             active_note: shell.active_note.as_ref(),
         };
-        shell.plugins.disable_plugin("core.markdown", &mut p_ctx);
-        assert!(!shell.plugins.is_enabled("core.markdown"));
+        shell.plugins.disable_plugin("core.quick_note", &mut p_ctx);
+        assert!(!shell.plugins.is_enabled("core.quick_note"));
 
-        // When markdown is disabled, ribbon buttons no longer contain it
+        // When quick_note is disabled, ribbon buttons no longer contain it
         let buttons = shell.plugins.enabled_ribbon_buttons();
-        assert!(!buttons.iter().any(|(id, _)| *id == "core.markdown"));
+        assert!(!buttons.iter().any(|(id, _)| *id == "core.quick_note"));
 
-        // Commands no longer contain markdown commands
+        // Commands no longer contain quick_note commands
         let commands = shell.plugins.enabled_commands();
-        assert!(!commands.iter().any(|c| c.plugin_id == "core.markdown"));
+        assert!(!commands.iter().any(|c| c.plugin_id == "core.quick_note"));
 
-        // Re-enable markdown plugin
+        // Re-enable quick_note plugin
         let mut p_ctx2 = PluginContext {
             vault: &mut shell.vault,
             index: &mut shell.index,
@@ -1108,9 +1201,25 @@ mod tests {
             event_bus: &mut shell.event_bus,
             active_note: shell.active_note.as_ref(),
         };
-        shell.plugins.enable_plugin("core.markdown", &mut p_ctx2);
-        assert!(shell.plugins.is_enabled("core.markdown"));
+        shell.plugins.enable_plugin("core.quick_note", &mut p_ctx2);
+        assert!(shell.plugins.is_enabled("core.quick_note"));
         let buttons2 = shell.plugins.enabled_ribbon_buttons();
-        assert!(buttons2.iter().any(|(id, _)| *id == "core.markdown"));
+        assert!(buttons2.iter().any(|(id, _)| *id == "core.quick_note"));
+    }
+
+    #[test]
+    fn test_right_panel_toggle_and_connection() {
+        let (_tmp, mut shell) = temp_app_shell();
+        assert_eq!(shell.active_right_plugin.as_deref(), Some("core.backlinks"));
+
+        // Toggle right panel closed
+        shell.event_bus.emit(AppEvent::ToggleRightPanel("core.backlinks".into()));
+        shell.process_events();
+        assert_eq!(shell.active_right_plugin, None);
+
+        // Toggle right panel open
+        shell.event_bus.emit(AppEvent::ToggleRightPanel("core.backlinks".into()));
+        shell.process_events();
+        assert_eq!(shell.active_right_plugin.as_deref(), Some("core.backlinks"));
     }
 }

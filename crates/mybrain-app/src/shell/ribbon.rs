@@ -7,6 +7,7 @@ use crate::theme::Tokens;
 
 pub struct RibbonAction {
     pub toggle_side: Option<String>,
+    pub toggle_right: Option<String>,
     pub switch_main: Option<String>,
     pub open_modal: Option<String>,
     pub open_command_palette: bool,
@@ -18,6 +19,7 @@ impl Default for RibbonAction {
     fn default() -> Self {
         Self {
             toggle_side: None,
+            toggle_right: None,
             switch_main: None,
             open_modal: None,
             open_command_palette: false,
@@ -33,6 +35,7 @@ pub fn render_ribbon(
     registry: &PluginRegistry,
     active_main: Option<&str>,
     active_side: Option<&str>,
+    active_right: Option<&str>,
     t: &Tokens,
 ) -> RibbonAction {
     let mut action = RibbonAction::default();
@@ -57,6 +60,7 @@ pub fn render_ribbon(
                 let is_active = match btn.view_type {
                     PluginViewType::MainWorkspace => active_main == Some(id),
                     PluginViewType::SidePanel => active_side == Some(id),
+                    PluginViewType::RightPanel => active_right == Some(id),
                     _ => false,
                 };
 
@@ -65,6 +69,9 @@ pub fn render_ribbon(
                     match btn.view_type {
                         PluginViewType::SidePanel => {
                             action.toggle_side = Some(id.to_string());
+                        }
+                        PluginViewType::RightPanel => {
+                            action.toggle_right = Some(id.to_string());
                         }
                         PluginViewType::MainWorkspace => {
                             action.switch_main = Some(id.to_string());

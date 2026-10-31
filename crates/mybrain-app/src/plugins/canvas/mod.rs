@@ -9,7 +9,7 @@ use mybrain_core::events_bus::AppEvent;
 use mybrain_core::note::NoteId;
 
 use crate::plugins::{
-    MyBrainPlugin, PluginCommand, PluginContext, PluginViewType, RibbonButton, RibbonSlot,
+    MyBrainPlugin, PluginCommand, PluginContext, RibbonButton,
 };
 use crate::theme::{self, Tokens};
 
@@ -117,13 +117,7 @@ impl MyBrainPlugin for CanvasPlugin {
     }
 
     fn ribbon_button(&self) -> Option<RibbonButton> {
-        Some(RibbonButton {
-            icon: "🎨",
-            tooltip: "Visual Canvas",
-            slot: RibbonSlot::Top,
-            view_type: PluginViewType::MainWorkspace,
-            priority: 50,
-        })
+        None
     }
 
     fn on_disable(&mut self, ctx: &mut PluginContext) {

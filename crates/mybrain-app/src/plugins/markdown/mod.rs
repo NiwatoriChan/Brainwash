@@ -13,7 +13,7 @@ use mybrain_core::note::NoteId;
 use mybrain_core::vault::Vault;
 
 use crate::plugins::{
-    MyBrainPlugin, PluginCommand, PluginContext, PluginViewType, RibbonButton, RibbonSlot,
+    MyBrainPlugin, PluginCommand, PluginContext, RibbonButton,
 };
 use crate::theme::{self, Tokens};
 
@@ -264,13 +264,7 @@ impl MyBrainPlugin for MarkdownPlugin {
     }
 
     fn ribbon_button(&self) -> Option<RibbonButton> {
-        Some(RibbonButton {
-            icon: "📝",
-            tooltip: "Markdown Notes (Ctrl+1)",
-            slot: RibbonSlot::Top,
-            view_type: PluginViewType::MainWorkspace,
-            priority: 20,
-        })
+        None
     }
 
     fn on_disable(&mut self, ctx: &mut PluginContext) {

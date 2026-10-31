@@ -34,8 +34,10 @@ pub enum RibbonSlot {
 pub enum PluginViewType {
     /// Renders in the central workspace area (e.g. Markdown Editor, Graph, Daily, Canvas).
     MainWorkspace,
-    /// Renders inside the collapsible sidebar panel next to the ribbon (e.g. File Explorer, Backlinks).
+    /// Renders inside the collapsible left sidebar panel next to the ribbon (e.g. File Explorer).
     SidePanel,
+    /// Renders inside the collapsible right panel (e.g. Connections & Backlinks).
+    RightPanel,
     /// Renders as a floating modal dialog overlay (e.g. Emoji Picker).
     ModalOverlay,
     /// Headless or background service.
@@ -92,9 +94,14 @@ impl<'a> PluginContext<'a> {
         self.event_bus.emit(AppEvent::ActivatePlugin(plugin_id.to_string()));
     }
 
-    /// Request to toggle a side panel plugin view.
+    /// Request to toggle a left side panel plugin view.
     pub fn toggle_side_panel(&mut self, plugin_id: &str) {
         self.event_bus.emit(AppEvent::ToggleSidePanel(plugin_id.to_string()));
+    }
+
+    /// Request to toggle the right panel plugin view.
+    pub fn toggle_right_panel(&mut self, plugin_id: &str) {
+        self.event_bus.emit(AppEvent::ToggleRightPanel(plugin_id.to_string()));
     }
 }
 
@@ -144,6 +151,11 @@ pub trait MyBrainPlugin: Send + Sync {
 
     /// Render the side panel drawer when this plugin is the active side plugin.
     fn render_side_panel(&mut self, _ui: &mut egui::Ui, _ctx: &mut PluginContext) {}
+
+    /// Render the right panel when this plugin is the active right plugin.
+    fn render_right_panel(&mut self, ui: &mut egui::Ui, ctx: &mut PluginContext) {
+        self.render_side_panel(ui, ctx);
+    }
 
     /// Render modal or overlay dialogs when applicable.
     fn render_modal(&mut self, _ctx_egui: &egui::Context, _ctx: &mut PluginContext) {}

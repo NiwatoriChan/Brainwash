@@ -19,8 +19,10 @@ pub enum AppEvent {
     NoteRenamed { old: NoteId, new: NoteId },
     /// Request to switch the active main workspace plugin view.
     ActivatePlugin(String),
-    /// Request to toggle a side panel plugin view (open or close).
+    /// Request to toggle a left side panel plugin view (open or close).
     ToggleSidePanel(String),
+    /// Request to toggle the right panel plugin view (open or close).
+    ToggleRightPanel(String),
     /// Request to open a modal overlay by ID.
     OpenModal(String),
     /// Insert text into the active editor at the current cursor position.
