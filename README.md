@@ -68,7 +68,7 @@ Brainwash is architected around a unified `MyBrainPlugin` trait managed by a cen
 * **Permanent Left Ribbon Bar (`shell/ribbon.rs`)**:
   - Always-visible vertical icon ribbon on the far left.
   - Top stack: Quick view switches for enabled plugins with active indicator highlights.
-  - File-backed views (`core.markdown` and `core.canvas`) open automatically when selecting `.md` or `.canvas` files, keeping the ribbon uncluttered.
+  - Clean & uncluttered: File-backed views (`core.markdown`, `core.canvas`) and the Connections panel are opened via files, shortcuts, and top-bar controls rather than cluttering the ribbon bar.
   - Bottom stack: Quick access to Command Palette (`Ctrl+P`), Vault Switcher (`Ctrl+O`), and Settings / Plugin Manager (`Ctrl+,`).
 * **Collapsible Three-Pane Layout**:
   - Left panel: File Explorer (`Ctrl+B`).

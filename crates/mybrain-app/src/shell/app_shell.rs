@@ -1165,12 +1165,12 @@ mod tests {
         let (_tmp, mut shell) = temp_app_shell();
         assert!(shell.plugins.is_enabled("core.quick_note"));
 
-        // By default, markdown and canvas do NOT have ribbon buttons
+        // By default, markdown, canvas, and backlinks do NOT have ribbon buttons on the left bar
         let initial_buttons = shell.plugins.enabled_ribbon_buttons();
-        assert!(!initial_buttons.iter().any(|(id, _)| *id == "core.markdown" || *id == "core.canvas"));
-        // But quick_note, explorer, backlinks DO have ribbon buttons
+        assert!(!initial_buttons.iter().any(|(id, _)| *id == "core.markdown" || *id == "core.canvas" || *id == "core.backlinks"));
+        // But quick_note and explorer DO have ribbon buttons
         assert!(initial_buttons.iter().any(|(id, _)| *id == "core.quick_note"));
-        assert!(initial_buttons.iter().any(|(id, _)| *id == "core.backlinks"));
+        assert!(initial_buttons.iter().any(|(id, _)| *id == "core.explorer"));
 
         // Disable quick_note plugin dynamically
         let mut p_ctx = PluginContext {

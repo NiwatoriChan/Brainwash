@@ -9,7 +9,7 @@ use mybrain_core::events_bus::AppEvent;
 use mybrain_core::note::NoteId;
 
 use crate::plugins::{
-    MyBrainPlugin, PluginCommand, PluginContext, RibbonButton,
+    MyBrainPlugin, PluginCommand, PluginContext, PluginViewType, RibbonButton,
 };
 use crate::theme::{self, Tokens};
 
@@ -114,6 +114,10 @@ impl MyBrainPlugin for CanvasPlugin {
 
     fn description(&self) -> &'static str {
         "Infinite 2D visual canvas for cards, notes, diagrams, and directional connections"
+    }
+
+    fn view_type(&self) -> PluginViewType {
+        PluginViewType::MainWorkspace
     }
 
     fn ribbon_button(&self) -> Option<RibbonButton> {
