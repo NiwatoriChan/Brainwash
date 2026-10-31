@@ -21,10 +21,14 @@ enum TreeAction {
     Folder(FolderAction),
     SetNoteColor(NoteId, Option<String>),
     SetNoteEmoji(NoteId, Option<String>),
+    SetNoteEmojiAndColor(NoteId, Option<String>, Option<String>),
     RenameNote(NoteId),
     DeleteNote(NoteId),
     SetFolderEmoji(String, Option<String>),
+    SetFolderColor(String, Option<String>),
+    SetFolderEmojiAndColor(String, Option<String>, Option<String>),
     OpenEmojiPicker(crate::state::EmojiPickerTarget),
+    OpenCustomColor(crate::state::CustomColorTarget, Option<String>),
 }
 
 #[derive(Default)]
@@ -185,33 +189,30 @@ fn render_note_item(
     // Right-click context menu for setting Emoji, Color, or Deleting
     resp.context_menu(|ui| {
         ui.set_min_width(170.0);
-        ui.menu_button("🎨 Set Color", |ui| {
-            ui.set_min_width(140.0);
-            for (label, val) in [
-                ("Default (None)", None),
-                ("Red", Some("red")),
-                ("Coral", Some("coral")),
-                ("Amber", Some("yellow")),
-                ("Green", Some("green")),
-                ("Teal", Some("teal")),
-                ("Blue", Some("blue")),
-                ("Purple", Some("purple")),
-                ("Magenta", Some("magenta")),
-                ("Brown", Some("brown")),
-            ] {
-                if ui.button(label).clicked() {
-                    *tree_action = Some(TreeAction::SetNoteColor(id.clone(), val.map(String::from)));
-                    ui.close();
+        ui.menu_button("Icon & Color", |ui| {
+            ui.set_min_width(220.0);
+            let current_color_name = state.get_note_color_name(id);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Color:").size(11.5).color(t.text_faint));
+                ui.add_space(4.0);
+                if let Some(act) = theme::color_picker_dots(ui, t, state.settings.effective_color_palette(), current_color_name.as_deref()) {
+                    match act {
+                        theme::ColorPickerAction::SetColor(c) => {
+                            *tree_action = Some(TreeAction::SetNoteColor(id.clone(), c));
+                        }
+                        theme::ColorPickerAction::OpenCustomColor => {
+                            *tree_action = Some(TreeAction::OpenCustomColor(crate::state::CustomColorTarget::Note(id.clone()), current_color_name.clone()));
+                            ui.close();
+                        }
+                    }
                 }
-            }
-        });
-
-        ui.menu_button("Set Emoji", |ui| {
-            ui.set_min_width(200.0);
-            ui.label(RichText::new("Quick Emojis:").size(11.0).color(t.text_faint));
+            });
+            ui.add_space(4.0);
+            ui.label(RichText::new("Emoji:").size(11.5).color(t.text_faint));
             ui.horizontal_wrapped(|ui| {
                 for emoji in ["📝", "📄", "💡", "🚀", "⭐", "📌", "🎯", "🔍", "🏷️", "💼", "📚", "🎨", "⚙️", "🌿", "⚡", "💬", "🧪", "📅"] {
-                    if ui.button(emoji).clicked() {
+                    let em_color = custom_color.unwrap_or(t.text);
+                    if ui.button(RichText::new(emoji).color(em_color)).clicked() {
                         *tree_action = Some(TreeAction::SetNoteEmoji(id.clone(), Some(emoji.to_string())));
                         ui.close();
                     }
@@ -222,8 +223,8 @@ fn render_note_item(
                 *tree_action = Some(TreeAction::OpenEmojiPicker(crate::state::EmojiPickerTarget::Note(id.clone())));
                 ui.close();
             }
-            if ui.button("Clear Emoji").clicked() {
-                *tree_action = Some(TreeAction::SetNoteEmoji(id.clone(), None));
+            if ui.button("Reset Color & Emoji").clicked() {
+                *tree_action = Some(TreeAction::SetNoteEmojiAndColor(id.clone(), None, None));
                 ui.close();
             }
         });
@@ -302,14 +303,16 @@ fn render_folder_node(
 
     let folder_emoji = state.get_folder_emoji(full_path);
 
+    let folder_color = state.get_folder_color(full_path).unwrap_or(t.accent);
+
     let header_resp = collapsing
         .show_header(ui, |ui| {
             ui.horizontal(|ui| {
                 if let Some(emoji) = &folder_emoji {
-                    ui.label(RichText::new(emoji).color(t.accent).size(12.5));
+                    ui.label(RichText::new(emoji).color(folder_color).size(12.5));
                 } else {
                     let (rect, _) = ui.allocate_exact_size(egui::vec2(13.0, 13.0), egui::Sense::hover());
-                    theme::paint_folder_icon(ui.painter(), rect, t.text_dim);
+                    theme::paint_folder_icon(ui.painter(), rect, folder_color);
                 }
                 ui.label(RichText::new(name).strong().size(12.5).color(t.text_dim));
                 let count =
@@ -338,11 +341,28 @@ fn render_folder_node(
                             ui.separator();
                         }
                         ui.menu_button("Set Emoji", |ui| {
-                            ui.set_min_width(200.0);
-                            ui.label(RichText::new("Quick Emojis:").size(11.0).color(t.text_faint));
+                            ui.set_min_width(220.0);
+                            let current_color_name = state.get_folder_color_name(full_path);
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new("Color:").size(11.5).color(t.text_faint));
+                                ui.add_space(4.0);
+                                if let Some(act) = theme::color_picker_dots(ui, t, state.settings.effective_color_palette(), current_color_name.as_deref()) {
+                                    match act {
+                                        theme::ColorPickerAction::SetColor(c) => {
+                                            *tree_action = Some(TreeAction::SetFolderColor(full_path.to_string(), c));
+                                        }
+                                        theme::ColorPickerAction::OpenCustomColor => {
+                                            *tree_action = Some(TreeAction::OpenCustomColor(crate::state::CustomColorTarget::Folder(full_path.to_string()), current_color_name.clone()));
+                                            ui.close();
+                                        }
+                                    }
+                                }
+                            });
+                            ui.add_space(4.0);
+                            ui.label(RichText::new("Emoji:").size(11.5).color(t.text_faint));
                             ui.horizontal_wrapped(|ui| {
                                 for emoji in ["📁", "📂", "🚀", "💡", "💼", "📚", "🎨", "🛠️", "🎯", "🏷️", "📦", "🌟", "📝", "⚙️", "🌿", "⚡", "💬", "🧪"] {
-                                    if ui.button(emoji).clicked() {
+                                    if ui.button(RichText::new(emoji).color(folder_color)).clicked() {
                                         *tree_action = Some(TreeAction::SetFolderEmoji(full_path.to_string(), Some(emoji.to_string())));
                                         ui.close();
                                     }
@@ -354,7 +374,7 @@ fn render_folder_node(
                                 ui.close();
                             }
                             if ui.button("Reset to Default").clicked() {
-                                *tree_action = Some(TreeAction::SetFolderEmoji(full_path.to_string(), None));
+                                *tree_action = Some(TreeAction::SetFolderEmojiAndColor(full_path.to_string(), None, None));
                                 ui.close();
                             }
                         });
@@ -418,11 +438,28 @@ fn render_folder_node(
         });
 
     header_resp.0.context_menu(|ui| {
-        ui.set_min_width(200.0);
-        ui.label(RichText::new("Quick Folder Emojis:").size(11.0).color(t.text_faint));
+        ui.set_min_width(220.0);
+        let current_color_name = state.get_folder_color_name(full_path);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Color:").size(11.5).color(t.text_faint));
+            ui.add_space(4.0);
+            if let Some(act) = theme::color_picker_dots(ui, t, state.settings.effective_color_palette(), current_color_name.as_deref()) {
+                match act {
+                    theme::ColorPickerAction::SetColor(c) => {
+                        *tree_action = Some(TreeAction::SetFolderColor(full_path.to_string(), c));
+                    }
+                    theme::ColorPickerAction::OpenCustomColor => {
+                        *tree_action = Some(TreeAction::OpenCustomColor(crate::state::CustomColorTarget::Folder(full_path.to_string()), current_color_name.clone()));
+                        ui.close();
+                    }
+                }
+            }
+        });
+        ui.add_space(4.0);
+        ui.label(RichText::new("Emoji:").size(11.5).color(t.text_faint));
         ui.horizontal_wrapped(|ui| {
             for emoji in ["📁", "📂", "🚀", "💡", "💼", "📚", "🎨", "🛠️", "🎯", "🏷️", "📦", "🌟", "📝", "⚙️", "🌿", "⚡", "💬", "🧪"] {
-                if ui.button(emoji).clicked() {
+                if ui.button(RichText::new(emoji).color(folder_color)).clicked() {
                     *tree_action = Some(TreeAction::SetFolderEmoji(full_path.to_string(), Some(emoji.to_string())));
                     ui.close();
                 }
@@ -434,7 +471,7 @@ fn render_folder_node(
             ui.close();
         }
         if ui.button("Reset to Default").clicked() {
-            *tree_action = Some(TreeAction::SetFolderEmoji(full_path.to_string(), None));
+            *tree_action = Some(TreeAction::SetFolderEmojiAndColor(full_path.to_string(), None, None));
             ui.close();
         }
     });
@@ -678,9 +715,23 @@ fn render_notes_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
             TreeAction::SetFolderEmoji(path, emoji) => {
                 state.set_folder_emoji(&path, emoji.as_deref());
             }
+            TreeAction::SetFolderColor(path, color) => {
+                state.set_folder_color(&path, color.as_deref());
+            }
+            TreeAction::SetFolderEmojiAndColor(path, emoji, color) => {
+                state.set_folder_emoji(&path, emoji.as_deref());
+                state.set_folder_color(&path, color.as_deref());
+            }
+            TreeAction::SetNoteEmojiAndColor(id, emoji, color) => {
+                state.set_note_emoji(&id, emoji.as_deref());
+                state.set_note_color(&id, color.as_deref());
+            }
             TreeAction::OpenEmojiPicker(target) => {
                 state.emoji_picker_target = Some(target);
                 state.emoji_picker_search.clear();
+            }
+            TreeAction::OpenCustomColor(target, curr) => {
+                state.open_custom_color_picker(target, curr.as_deref());
             }
         }
     }

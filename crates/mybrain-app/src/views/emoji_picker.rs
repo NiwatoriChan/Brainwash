@@ -158,7 +158,9 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
 
     let target_color = match &target {
         EmojiPickerTarget::Note(id) => state.get_note_color(id),
-        _ => None,
+        EmojiPickerTarget::Folder(path) => state.get_folder_color(path),
+        EmojiPickerTarget::NewNoteDialog => state.new_note_color.as_deref().and_then(crate::state::parse_color_str),
+        EmojiPickerTarget::NewFolderDialog => state.new_folder_color.as_deref().and_then(crate::state::parse_color_str),
     };
     let glyph_color = target_color.unwrap_or(Color32::WHITE);
 
@@ -255,6 +257,52 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
         });
 
         ui.add_space(8.0);
+
+        // Color selector row (same as quick capture)
+        let curr_color_name: Option<String> = match &target {
+            EmojiPickerTarget::Note(id) => state.get_note_color_name(id),
+            EmojiPickerTarget::Folder(path) => state.get_folder_color_name(path),
+            EmojiPickerTarget::NewNoteDialog => state.new_note_color.clone(),
+            EmojiPickerTarget::NewFolderDialog => state.new_folder_color.clone(),
+        };
+
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Color:").size(12.0).color(t.text_dim));
+            ui.add_space(4.0);
+            if let Some(action) = theme::color_picker_dots(ui, &t, state.settings.effective_color_palette(), curr_color_name.as_deref()) {
+                match action {
+                    theme::ColorPickerAction::SetColor(new_color) => {
+                        match &target {
+                            EmojiPickerTarget::Note(id) => {
+                                state.set_note_color(id, new_color.as_deref());
+                            }
+                            EmojiPickerTarget::Folder(path) => {
+                                state.set_folder_color(path, new_color.as_deref());
+                            }
+                            EmojiPickerTarget::NewNoteDialog => {
+                                state.new_note_color = new_color;
+                            }
+                            EmojiPickerTarget::NewFolderDialog => {
+                                state.new_folder_color = new_color;
+                            }
+                        }
+                    }
+                    theme::ColorPickerAction::OpenCustomColor => {
+                        let custom_target = match &target {
+                            EmojiPickerTarget::Note(id) => crate::state::CustomColorTarget::Note(id.clone()),
+                            EmojiPickerTarget::Folder(path) => crate::state::CustomColorTarget::Folder(path.clone()),
+                            EmojiPickerTarget::NewNoteDialog => crate::state::CustomColorTarget::NewNoteDialog,
+                            EmojiPickerTarget::NewFolderDialog => crate::state::CustomColorTarget::NewFolderDialog,
+                        };
+                        state.open_custom_color_picker(custom_target, curr_color_name.as_deref());
+                    }
+                }
+            }
+        });
+
+        ui.add_space(6.0);
+        ui.label(RichText::new("Emoji:").size(12.0).color(t.text_dim));
+        ui.add_space(2.0);
 
         // Filter database
         let filtered: Vec<&EmojiDef> = EMOJI_DATABASE

@@ -47,6 +47,16 @@ pub enum EmojiPickerTarget {
     NewNoteDialog,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CustomColorTarget {
+    Note(NoteId),
+    Folder(String),
+    QuickComposer,
+    NewNoteDialog,
+    NewFolderDialog,
+}
+
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SidebarSection {
     Notes,
@@ -146,6 +156,7 @@ pub struct AppState {
     pub show_new_note_dialog: bool,
     pub new_note_name: String,
     pub new_note_emoji: Option<String>,
+    pub new_note_color: Option<String>,
 
     pub show_rename_note_dialog: bool,
     pub rename_note_target: Option<NoteId>,
@@ -158,6 +169,14 @@ pub struct AppState {
     pub emoji_picker_target: Option<EmojiPickerTarget>,
     pub emoji_picker_search: String,
     pub new_folder_emoji: Option<String>,
+    pub new_folder_color: Option<String>,
+
+    // Custom Color Dialog & Palette Settings
+    pub custom_color_target: Option<CustomColorTarget>,
+    pub custom_color_hex_input: String,
+    pub custom_color_name_input: String,
+    pub settings_new_color_label: String,
+    pub settings_new_color_hex: String,
 
     // Insert Table Dialog
     pub show_insert_table_dialog: bool,
@@ -286,6 +305,7 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
             show_new_note_dialog: false,
             new_note_name: String::new(),
             new_note_emoji: None,
+            new_note_color: None,
             show_rename_note_dialog: false,
             rename_note_target: None,
             rename_note_new_name: String::new(),
@@ -294,6 +314,12 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
             emoji_picker_target: None,
             emoji_picker_search: String::new(),
             new_folder_emoji: None,
+            new_folder_color: None,
+            custom_color_target: None,
+            custom_color_hex_input: "#2d9cdb".to_string(),
+            custom_color_name_input: String::new(),
+            settings_new_color_label: String::new(),
+            settings_new_color_hex: "#eb5757".to_string(),
             show_insert_table_dialog: false,
             insert_table_cols: 3,
             insert_table_rows: 3,
@@ -545,6 +571,16 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
         parse_color_str(color_val)
     }
 
+    pub fn get_note_color_name(&self, id: &NoteId) -> Option<String> {
+        let content = if self.active_note.as_ref() == Some(id) {
+            &self.editor_buffer
+        } else {
+            &self.vault.get(id)?.content
+        };
+        let (fm, _) = mybrain_core::Frontmatter::parse(content);
+        fm.get("color").map(str::to_string)
+    }
+
     pub fn set_note_color(&mut self, id: &NoteId, color: Option<&str>) {
         let is_active = self.active_note.as_ref() == Some(id);
         let content = if is_active {
@@ -641,6 +677,100 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
         let _ = self.settings.save_to_file(&settings_path);
     }
 
+    pub fn get_folder_color(&self, folder_path: &str) -> Option<Color32> {
+        let clean = folder_path.trim().trim_matches('/');
+        if let Some(c) = self.settings.folder_colors.get(clean) {
+            return parse_color_str(c);
+        }
+        None
+    }
+
+    pub fn get_folder_color_name(&self, folder_path: &str) -> Option<String> {
+        let clean = folder_path.trim().trim_matches('/');
+        self.settings.folder_colors.get(clean).cloned()
+    }
+
+    pub fn set_folder_color(&mut self, folder_path: &str, color: Option<&str>) {
+        let clean = folder_path.trim().trim_matches('/').to_string();
+        if let Some(c) = color {
+            self.settings.folder_colors.insert(clean, c.trim().to_string());
+        } else {
+            self.settings.folder_colors.remove(&clean);
+        }
+        let settings_path = self.vault.root().join(".brainwash").join("settings.json");
+        let _ = self.settings.save_to_file(&settings_path);
+    }
+
+    pub fn open_custom_color_picker(&mut self, target: CustomColorTarget, current_color: Option<&str>) {
+        self.custom_color_target = Some(target);
+        self.custom_color_name_input.clear();
+        let default_hex = "#2d9cdb";
+        let hex = if let Some(c) = current_color {
+            if c.starts_with('#') {
+                c.to_string()
+            } else if let Some(def) = self.settings.effective_color_palette().iter().find(|d| d.name.eq_ignore_ascii_case(c)) {
+                def.hex.clone()
+            } else if let Some(c32) = parse_color_str(c) {
+                format!("#{:02x}{:02x}{:02x}", c32.r(), c32.g(), c32.b())
+            } else {
+                default_hex.to_string()
+            }
+        } else {
+            default_hex.to_string()
+        };
+        self.custom_color_hex_input = hex;
+    }
+
+    pub fn apply_custom_color(&mut self, hex: &str, add_to_palette: bool, palette_name: Option<&str>) {
+        let hex = hex.trim();
+        let formatted_hex = if hex.starts_with('#') {
+            hex.to_string()
+        } else {
+            format!("#{}", hex)
+        };
+
+        if add_to_palette {
+            let label = palette_name
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or("Custom")
+                .to_string();
+            let mut name = label.to_lowercase().replace(' ', "-");
+            if name.is_empty() {
+                name = "custom".to_string();
+            }
+            if !self.settings.color_palette.iter().any(|c| c.hex.eq_ignore_ascii_case(&formatted_hex)) {
+                self.settings.color_palette.push(mybrain_core::settings::ColorDef {
+                    name,
+                    label,
+                    hex: formatted_hex.clone(),
+                });
+                self.save_settings();
+            }
+        }
+
+        if let Some(target) = self.custom_color_target.take() {
+            match target {
+                CustomColorTarget::Note(id) => {
+                    self.set_note_color(&id, Some(&formatted_hex));
+                }
+                CustomColorTarget::Folder(path) => {
+                    self.set_folder_color(&path, Some(&formatted_hex));
+                }
+                CustomColorTarget::QuickComposer => {
+                    self.quick_composer_color = Some(formatted_hex);
+                }
+                CustomColorTarget::NewNoteDialog => {
+                    self.new_note_color = Some(formatted_hex);
+                }
+                CustomColorTarget::NewFolderDialog => {
+                    self.new_folder_color = Some(formatted_hex);
+                }
+            }
+        }
+    }
+
+
     pub fn create_note(&mut self, name: &str) {
         let name = name.trim();
         if name.is_empty() {
@@ -657,6 +787,9 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
                 let initial = format!("# {}\n\n", id.name());
                 match self.vault.create(id.clone(), &initial) {
                     Ok(_) => {
+                        if let Some(color) = self.new_note_color.take() {
+                            self.set_note_color(&id, Some(&color));
+                        }
                         if let Some(emoji) = self.new_note_emoji.take() {
                             self.set_note_emoji(&id, Some(&emoji));
                         }
@@ -1199,6 +1332,9 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
             return Err(mybrain_core::Error::InvalidName("Cannot create folder with reserved name (Daily, Quick Notes)".into()));
         }
         self.vault.create_folder(&rel)?;
+        if let Some(color) = self.new_folder_color.take() {
+            self.set_folder_color(&rel, Some(&color));
+        }
         if let Some(emoji) = self.new_folder_emoji.take() {
             self.set_folder_emoji(&rel, Some(&emoji));
         }
@@ -1519,6 +1655,54 @@ mod tests {
         state.set_folder_emoji("Projects", None);
         assert_eq!(state.get_folder_emoji("Projects"), None);
     }
+
+    #[test]
+    fn test_folder_color() {
+        let (_tmp, mut state) = temp_app_state();
+        assert_eq!(state.get_folder_color("Projects"), None);
+
+        state.set_folder_color("Projects", Some("teal"));
+        assert!(state.get_folder_color("Projects").is_some());
+        assert_eq!(state.get_folder_color_name("Projects"), Some("teal".to_string()));
+
+        // Also works with trailing slashes
+        assert_eq!(state.get_folder_color_name("Projects/"), Some("teal".to_string()));
+
+        state.set_folder_color("Projects", None);
+        assert_eq!(state.get_folder_color("Projects"), None);
+    }
+
+    #[test]
+    fn test_custom_color_picker_and_palette_customization() {
+        let (_tmp, mut state) = temp_app_state();
+        let note_id = NoteId::new("SpecialNote").unwrap();
+        state.vault.create(note_id.clone(), "# Special\n").unwrap();
+        state.open_note(note_id.clone());
+
+        // 1. Open custom color picker for Note
+        state.open_custom_color_picker(CustomColorTarget::Note(note_id.clone()), None);
+        assert_eq!(state.custom_color_target, Some(CustomColorTarget::Note(note_id.clone())));
+        assert_eq!(state.custom_color_hex_input, "#2d9cdb");
+
+        // 2. Apply custom color and save to palette
+        state.apply_custom_color("#ff007f", true, Some("Neon Rose"));
+        assert_eq!(state.custom_color_target, None);
+        assert_eq!(state.get_note_color_name(&note_id), Some("#ff007f".to_string()));
+        assert!(state.settings.color_palette.iter().any(|c| c.hex == "#ff007f" && c.label == "Neon Rose"));
+        assert!(state.settings.effective_color_palette().iter().any(|c| c.hex == "#ff007f"));
+
+        // 3. Open custom color picker for Folder
+        state.open_custom_color_picker(CustomColorTarget::Folder("Docs".to_string()), Some("#ff007f"));
+        assert_eq!(state.custom_color_hex_input, "#ff007f");
+        state.apply_custom_color("#00e5ff", false, None);
+        assert_eq!(state.get_folder_color_name("Docs"), Some("#00e5ff".to_string()));
+
+        // 4. Open custom color picker for QuickComposer
+        state.open_custom_color_picker(CustomColorTarget::QuickComposer, None);
+        state.apply_custom_color("#a855f7", false, None);
+        assert_eq!(state.quick_composer_color, Some("#a855f7".to_string()));
+    }
+
 
     #[test]
     fn test_is_daily_and_event_isolation() {

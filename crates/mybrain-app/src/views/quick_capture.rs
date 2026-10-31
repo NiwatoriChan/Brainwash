@@ -1,7 +1,7 @@
 //! Quick Notes view, masonry card board, and quick capture composer.
 
 use egui::{
-    vec2, Color32, CornerRadius, CursorIcon, Frame, Id, Margin, RichText, ScrollArea, Sense,
+    vec2, Color32, CornerRadius, Frame, Id, Margin, RichText, ScrollArea, Sense,
     Stroke, Ui,
 };
 use mybrain_core::{Note, NoteId};
@@ -332,36 +332,15 @@ fn render_composer_bar(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
                     // Action row
                     ui.horizontal(|ui| {
                         // Color picker dots
-                        for color_def in QUICK_COLORS {
-                            let (rect, resp) =
-                                ui.allocate_exact_size(vec2(16.0, 16.0), Sense::click());
-                            let is_curr = state.quick_composer_color.as_deref()
-                                == Some(color_def.name)
-                                || (state.quick_composer_color.is_none()
-                                    && color_def.name == "default");
-
-                            ui.painter().circle_filled(
-                                rect.center(),
-                                7.0,
-                                color_def.dot_color,
-                            );
-                            if is_curr {
-                                ui.painter().circle_stroke(
-                                    rect.center(),
-                                    8.5,
-                                    Stroke::new(1.5, t.text),
-                                );
-                            }
-                            if resp
-                                .on_hover_text(color_def.label)
-                                .on_hover_cursor(CursorIcon::PointingHand)
-                                .clicked()
-                            {
-                                state.quick_composer_color = if color_def.name == "default" {
-                                    None
-                                } else {
-                                    Some(color_def.name.to_string())
-                                };
+                        if let Some(action) = theme::color_picker_dots(ui, t, state.settings.effective_color_palette(), state.quick_composer_color.as_deref()) {
+                            match action {
+                                theme::ColorPickerAction::SetColor(c) => {
+                                    state.quick_composer_color = c;
+                                }
+                                theme::ColorPickerAction::OpenCustomColor => {
+                                    let curr = state.quick_composer_color.clone();
+                                    state.open_custom_color_picker(crate::state::CustomColorTarget::QuickComposer, curr.as_deref());
+                                }
                             }
                         }
 

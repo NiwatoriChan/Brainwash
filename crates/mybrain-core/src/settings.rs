@@ -32,6 +32,35 @@ pub struct AppSettings {
     pub recent_vaults: Vec<String>,
     /// Custom emoji icons mapped to relative folder paths in tree view.
     pub folder_emojis: BTreeMap<String, String>,
+    /// Custom color mapped to relative folder paths in tree view.
+    #[serde(default)]
+    pub folder_colors: BTreeMap<String, String>,
+    /// Customizable favorite color palette for notes, folders, and emojis.
+    #[serde(default = "default_color_palette")]
+    pub color_palette: Vec<ColorDef>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ColorDef {
+    pub name: String,
+    pub label: String,
+    pub hex: String,
+}
+
+pub fn default_color_palette() -> Vec<ColorDef> {
+    vec![
+        ColorDef { name: "default".into(), label: "Default".into(), hex: "#8c8c91".into() },
+        ColorDef { name: "coral".into(), label: "Coral".into(), hex: "#eb5757".into() },
+        ColorDef { name: "peach".into(), label: "Peach".into(), hex: "#f2994a".into() },
+        ColorDef { name: "sand".into(), label: "Sand".into(), hex: "#f2c94c".into() },
+        ColorDef { name: "mint".into(), label: "Mint".into(), hex: "#27ae60".into() },
+        ColorDef { name: "teal".into(), label: "Teal".into(), hex: "#2d9cdb".into() },
+        ColorDef { name: "sky".into(), label: "Sky Blue".into(), hex: "#56ccf2".into() },
+        ColorDef { name: "dusk".into(), label: "Dusk".into(), hex: "#6f52d8".into() },
+        ColorDef { name: "lavender".into(), label: "Lavender".into(), hex: "#9b51e0".into() },
+        ColorDef { name: "pink".into(), label: "Blossom".into(), hex: "#eb5789".into() },
+        ColorDef { name: "clay".into(), label: "Clay".into(), hex: "#b48264".into() },
+    ]
 }
 
 impl Default for AppSettings {
@@ -46,11 +75,21 @@ impl Default for AppSettings {
             canvas_snap_to_grid: true,
             recent_vaults: Vec::new(),
             folder_emojis: BTreeMap::new(),
+            folder_colors: BTreeMap::new(),
+            color_palette: default_color_palette(),
         }
     }
 }
 
 impl AppSettings {
+    pub fn effective_color_palette(&self) -> &[ColorDef] {
+        if self.color_palette.is_empty() {
+            static DEFAULT: std::sync::OnceLock<Vec<ColorDef>> = std::sync::OnceLock::new();
+            DEFAULT.get_or_init(default_color_palette)
+        } else {
+            &self.color_palette
+        }
+    }
     /// Load settings from a JSON file, or returns default if file does not exist.
     pub fn load_from_file(path: &Path) -> Self {
         if let Ok(content) = fs::read_to_string(path) {

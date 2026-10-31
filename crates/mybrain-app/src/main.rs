@@ -479,6 +479,7 @@ impl eframe::App for BrainwashApp {
         views::settings_dialog::show(&ctx, &mut self.state);
         views::vault_switcher::show(&ctx, &mut self.state);
         views::emoji_picker::show(&ctx, &mut self.state);
+        views::dialogs::show_custom_color(&ctx, &mut self.state);
 
         // Drag-and-drop preview tooltip & unconsumed cleanup
         if let Some(dragged) = egui::DragAndDrop::payload::<crate::state::DraggedNote>(&ctx) {

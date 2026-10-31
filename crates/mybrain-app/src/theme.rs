@@ -413,6 +413,117 @@ pub fn list_row(
     resp.on_hover_cursor(CursorIcon::PointingHand)
 }
 
+/// Parse hex code (e.g. "#RRGGBB" or "#RGB") into a Color32.
+pub fn parse_hex_color(hex_str: &str) -> Option<Color32> {
+    let hex = hex_str.trim().strip_prefix('#').unwrap_or(hex_str.trim());
+    if hex.len() == 6 {
+        let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+        let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+        let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+        return Some(Color32::from_rgb(r, g, b));
+    } else if hex.len() == 3 {
+        let r = u8::from_str_radix(&hex[0..1], 16).ok()? * 17;
+        let g = u8::from_str_radix(&hex[1..2], 16).ok()? * 17;
+        let b = u8::from_str_radix(&hex[2..3], 16).ok()? * 17;
+        return Some(Color32::from_rgb(r, g, b));
+    }
+    None
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ColorPickerAction {
+    SetColor(Option<String>),
+    OpenCustomColor,
+}
+
+/// Renders the unified color selector row of circular color dots using the customizable palette,
+/// plus a round "+" button at the end for custom colors.
+pub fn color_picker_dots(
+    ui: &mut Ui,
+    t: &Tokens,
+    palette: &[mybrain_core::settings::ColorDef],
+    current_color: Option<&str>,
+) -> Option<ColorPickerAction> {
+    let mut action = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        for color_def in palette {
+            let dot_col = parse_hex_color(&color_def.hex).unwrap_or(t.text_dim);
+            let (rect, resp) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::click());
+            let is_curr = current_color
+                .map(|c| c.eq_ignore_ascii_case(&color_def.name) || c.eq_ignore_ascii_case(&color_def.hex))
+                .unwrap_or(color_def.name == "default");
+
+            ui.painter().circle_filled(
+                rect.center(),
+                7.0,
+                dot_col,
+            );
+            if is_curr {
+                ui.painter().circle_stroke(
+                    rect.center(),
+                    8.5,
+                    Stroke::new(1.5, t.text),
+                );
+            }
+            if resp
+                .on_hover_text(&color_def.label)
+                .on_hover_cursor(CursorIcon::PointingHand)
+                .clicked()
+            {
+                if color_def.name == "default" {
+                    action = Some(ColorPickerAction::SetColor(None));
+                } else {
+                    action = Some(ColorPickerAction::SetColor(Some(color_def.name.clone())));
+                }
+            }
+        }
+
+        // Custom Color round "+" button at the end of the line
+        let (rect, resp) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::click());
+        let is_custom_selected = current_color
+            .map(|c| !c.eq_ignore_ascii_case("default") && !palette.iter().any(|d| d.name.eq_ignore_ascii_case(c) || d.hex.eq_ignore_ascii_case(c)))
+            .unwrap_or(false);
+
+        let custom_color32 = if is_custom_selected {
+            current_color.and_then(crate::state::parse_color_str)
+        } else {
+            None
+        };
+
+        if let Some(col) = custom_color32 {
+            ui.painter().circle_filled(rect.center(), 7.0, col);
+            ui.painter().circle_stroke(
+                rect.center(),
+                8.5,
+                Stroke::new(1.5, t.text),
+            );
+        } else {
+            ui.painter().circle_stroke(
+                rect.center(),
+                7.0,
+                Stroke::new(1.0, t.separator),
+            );
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "+",
+                egui::FontId::proportional(12.0),
+                t.text_dim,
+            );
+        }
+
+        if resp
+            .on_hover_text("Custom Color")
+            .on_hover_cursor(CursorIcon::PointingHand)
+            .clicked()
+        {
+            action = Some(ColorPickerAction::OpenCustomColor);
+        }
+    });
+    action
+}
+
 /// Segmented control (pill group). Returns the option clicked this frame, if any.
 pub fn segmented<T: PartialEq + Copy>(
     ui: &mut Ui,

@@ -6,10 +6,11 @@
 //! - Editor font size
 //! - Vault defaults (Daily notes folder, Events folder, Canvas snap-to-grid)
 
-use egui::{Color32, CornerRadius, Id, Margin, RichText, Stroke, Ui};
+use egui::{vec2, Color32, CornerRadius, Id, Margin, RichText, Sense, Stroke, Ui};
 
 use crate::state::AppState;
 use crate::theme::{self, ThemeKind, Tokens};
+use mybrain_core::settings::{default_color_palette, ColorDef};
 
 pub fn show(ctx: &egui::Context, state: &mut AppState) {
     if !state.show_settings_dialog {
@@ -119,8 +120,114 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
 
             ui.add_space(12.0);
 
-            // Section 3: Vault & Folders
+            // Section 3: Favorite Colors Palette
+            theme::section_label(ui, &t, "Favorite Colors Palette");
+            ui.add_space(4.0);
+
+            let palette_card = theme::card_frame(&t, false).inner_margin(Margin::symmetric(14, 10));
+            palette_card.show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Colors available across Quick Notes, Sidebar & Emojis").color(t.text_dim).size(12.0));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if theme::ghost_button(ui, &t, RichText::new("Reset Defaults").size(11.5).color(t.text_dim)).clicked() {
+                            state.settings.color_palette = default_color_palette();
+                            state.save_settings();
+                        }
+                    });
+                });
+
+                ui.add_space(8.0);
+
+                // List of current colors
+                let mut to_remove = None;
+                for (idx, color_def) in state.settings.color_palette.iter().enumerate() {
+                    let col = theme::parse_hex_color(&color_def.hex).unwrap_or(t.text_dim);
+                    ui.horizontal(|ui| {
+                        let (rect, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+                        ui.painter().circle_filled(rect.center(), 7.0, col);
+                        ui.painter().circle_stroke(rect.center(), 8.0, Stroke::new(1.0, t.field_border));
+
+                        ui.add_space(4.0);
+                        ui.label(RichText::new(&color_def.label).size(12.5).color(t.text));
+                        ui.label(RichText::new(&color_def.hex).size(11.0).monospace().color(t.text_faint));
+
+                        if color_def.name != "default" {
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if theme::ghost_button(ui, &t, RichText::new("×").size(13.0).color(t.text_faint)).clicked() {
+                                    to_remove = Some(idx);
+                                }
+                            });
+                        }
+                    });
+                    ui.add_space(2.0);
+                }
+
+                if let Some(idx) = to_remove {
+                    state.settings.color_palette.remove(idx);
+                    state.save_settings();
+                }
+
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(6.0);
+
+                // Add new favorite color
+                ui.label(RichText::new("Add Color to Favorites:").size(12.0).color(t.text_dim));
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    let preview_col = theme::parse_hex_color(&state.settings_new_color_hex).unwrap_or(t.accent);
+                    let (rect, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
+                    ui.painter().circle_filled(rect.center(), 8.0, preview_col);
+                    ui.painter().circle_stroke(rect.center(), 9.0, Stroke::new(1.0, t.field_border));
+
+                    ui.add_space(2.0);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut state.settings_new_color_hex)
+                            .hint_text("#RRGGBB")
+                            .desired_width(75.0),
+                    );
+
+                    ui.add(
+                        egui::TextEdit::singleline(&mut state.settings_new_color_label)
+                            .hint_text("Label (e.g. Amber)")
+                            .desired_width(120.0),
+                    );
+
+                    let can_add = theme::parse_hex_color(&state.settings_new_color_hex).is_some();
+                    if ui.add_enabled(
+                        can_add,
+                        egui::Button::new(RichText::new("+ Add").size(11.5).color(Color32::WHITE))
+                            .fill(t.accent)
+                            .stroke(Stroke::NONE)
+                            .corner_radius(CornerRadius::same(t.radius_sm as u8)),
+                    ).clicked() {
+                        let hex = if state.settings_new_color_hex.starts_with('#') {
+                            state.settings_new_color_hex.trim().to_string()
+                        } else {
+                            format!("#{}", state.settings_new_color_hex.trim())
+                        };
+                        let label = if state.settings_new_color_label.trim().is_empty() {
+                            hex.clone()
+                        } else {
+                            state.settings_new_color_label.trim().to_string()
+                        };
+                        let name = label.to_lowercase().replace(' ', "-");
+                        state.settings.color_palette.push(ColorDef {
+                            name,
+                            label,
+                            hex,
+                        });
+                        state.settings_new_color_label.clear();
+                        state.save_settings();
+                    }
+                });
+            });
+
+            ui.add_space(12.0);
+
+            // Section 4: Vault & Folders
             theme::section_label(ui, &t, "Vault & Folders");
+
             ui.add_space(4.0);
 
             let card = theme::card_frame(&t, false).inner_margin(Margin::symmetric(14, 10));

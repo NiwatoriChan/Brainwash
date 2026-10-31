@@ -1,7 +1,7 @@
 //! Modals for creating new notes and new calendar events.
 
 use chrono::NaiveDate;
-use egui::{Color32, CornerRadius, Frame, Id, Margin, RichText, Stroke};
+use egui::{vec2, Color32, CornerRadius, Frame, Id, Margin, RichText, Sense, Stroke};
 use mybrain_core::events::parse_time;
 
 use crate::state::AppState;
@@ -56,7 +56,7 @@ pub fn show_new_note(ctx: &egui::Context, state: &mut AppState) {
             submitted = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         });
 
-        let typed_name = state.new_note_name.trim();
+        let typed_name = state.new_note_name.trim().to_string();
         let target_folder = match &state.new_note_folder {
             Some(f) if !f.is_empty() && !typed_name.contains('/') => Some(f.clone()),
             _ => {
@@ -83,13 +83,31 @@ pub fn show_new_note(ctx: &egui::Context, state: &mut AppState) {
         }
 
         ui.add_space(8.0);
-        ui.label(RichText::new("Note Emoji / Icon:").color(t.text_dim).size(12.0));
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Color:").color(t.text_dim).size(12.0));
+            ui.add_space(4.0);
+            if let Some(action) = theme::color_picker_dots(ui, &t, state.settings.effective_color_palette(), state.new_note_color.as_deref()) {
+                match action {
+                    theme::ColorPickerAction::SetColor(c) => {
+                        state.new_note_color = c;
+                    }
+                    theme::ColorPickerAction::OpenCustomColor => {
+                        let curr = state.new_note_color.clone();
+                        state.open_custom_color_picker(crate::state::CustomColorTarget::NewNoteDialog, curr.as_deref());
+                    }
+                }
+            }
+        });
+
+        ui.add_space(6.0);
+        ui.label(RichText::new("Emoji:").color(t.text_dim).size(12.0));
         ui.horizontal_wrapped(|ui| {
+            let note_col = state.new_note_color.as_deref().and_then(crate::state::parse_color_str).unwrap_or(t.accent);
             let current_emoji = state.new_note_emoji.as_deref().unwrap_or("📝");
-            ui.label(RichText::new(current_emoji).color(t.accent).size(16.0));
+            ui.label(RichText::new(current_emoji).color(note_col).size(16.0));
             ui.add_space(4.0);
             for em in ["📝", "📄", "💡", "🚀", "⭐", "📌", "🎯", "🔍", "🏷️", "💼", "📚", "🎨"] {
-                if ui.button(em).clicked() {
+                if ui.button(RichText::new(em).color(note_col)).clicked() {
                     state.new_note_emoji = Some(em.to_string());
                 }
             }
@@ -97,8 +115,9 @@ pub fn show_new_note(ctx: &egui::Context, state: &mut AppState) {
                 state.emoji_picker_target = Some(crate::state::EmojiPickerTarget::NewNoteDialog);
                 state.emoji_picker_search.clear();
             }
-            if state.new_note_emoji.is_some() && ui.button("× Reset").clicked() {
+            if (state.new_note_emoji.is_some() || state.new_note_color.is_some()) && ui.button("× Reset").clicked() {
                 state.new_note_emoji = None;
+                state.new_note_color = None;
             }
         });
 
@@ -457,13 +476,13 @@ pub fn show_new_folder(ctx: &egui::Context, state: &mut AppState) {
             }
         });
 
-        let typed_folder = state.new_folder_name.trim();
+        let typed_folder = state.new_folder_name.trim().to_string();
         let is_reserved_parent = state
             .new_folder_parent
             .as_deref()
             .map(|p| state.is_reserved_special_folder(p))
             .unwrap_or(false);
-        let is_reserved_name = !typed_folder.is_empty() && state.is_reserved_special_folder(typed_folder);
+        let is_reserved_name = !typed_folder.is_empty() && state.is_reserved_special_folder(&typed_folder);
         let is_blocked = is_reserved_parent || is_reserved_name;
 
         if is_blocked {
@@ -476,13 +495,31 @@ pub fn show_new_folder(ctx: &egui::Context, state: &mut AppState) {
         }
 
         ui.add_space(8.0);
-        ui.label(RichText::new("Folder Emoji / Icon:").color(t.text_dim).size(12.0));
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Color:").color(t.text_dim).size(12.0));
+            ui.add_space(4.0);
+            if let Some(action) = theme::color_picker_dots(ui, &t, state.settings.effective_color_palette(), state.new_folder_color.as_deref()) {
+                match action {
+                    theme::ColorPickerAction::SetColor(c) => {
+                        state.new_folder_color = c;
+                    }
+                    theme::ColorPickerAction::OpenCustomColor => {
+                        let curr = state.new_folder_color.clone();
+                        state.open_custom_color_picker(crate::state::CustomColorTarget::NewFolderDialog, curr.as_deref());
+                    }
+                }
+            }
+        });
+
+        ui.add_space(6.0);
+        ui.label(RichText::new("Emoji:").color(t.text_dim).size(12.0));
         ui.horizontal_wrapped(|ui| {
+            let folder_col = state.new_folder_color.as_deref().and_then(crate::state::parse_color_str).unwrap_or(t.accent);
             let current_emoji = state.new_folder_emoji.as_deref().unwrap_or("📁");
-            ui.label(RichText::new(current_emoji).color(t.accent).size(16.0));
+            ui.label(RichText::new(current_emoji).color(folder_col).size(16.0));
             ui.add_space(4.0);
             for em in ["📁", "📂", "🚀", "💡", "💼", "📚", "🎨", "🛠️", "🎯", "🏷️", "📦", "🌟"] {
-                if ui.button(em).clicked() {
+                if ui.button(RichText::new(em).color(folder_col)).clicked() {
                     state.new_folder_emoji = Some(em.to_string());
                 }
             }
@@ -490,8 +527,9 @@ pub fn show_new_folder(ctx: &egui::Context, state: &mut AppState) {
                 state.emoji_picker_target = Some(crate::state::EmojiPickerTarget::NewFolderDialog);
                 state.emoji_picker_search.clear();
             }
-            if state.new_folder_emoji.is_some() && ui.button("× Reset").clicked() {
+            if (state.new_folder_emoji.is_some() || state.new_folder_color.is_some()) && ui.button("× Reset").clicked() {
                 state.new_folder_emoji = None;
+                state.new_folder_color = None;
             }
         });
 
@@ -787,3 +825,123 @@ pub fn show_insert_image(ctx: &egui::Context, state: &mut AppState) {
         state.show_insert_image_dialog = false;
     }
 }
+
+/// Modal dialog for picking and applying a custom color, with the option to save to favorites palette.
+pub fn show_custom_color(ctx: &egui::Context, state: &mut AppState) {
+    if state.custom_color_target.is_none() {
+        return;
+    }
+
+    let t = Tokens::get(ctx);
+    let mut should_close = false;
+    let mut should_apply = false;
+
+    let modal = egui::Modal::new(Id::unique("custom_color_modal"))
+        .backdrop_color(Color32::from_black_alpha(150))
+        .frame(theme::modal_frame(&t));
+
+    let modal_resp = modal.show(ctx, |ui| {
+        ui.set_width(340.0);
+
+        ui.horizontal(|ui| {
+            ui.heading(RichText::new("Custom Color").color(t.text).strong().size(16.0));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if theme::icon_close_button(ui, &t).clicked() {
+                    should_close = true;
+                }
+            });
+        });
+
+        ui.add_space(8.0);
+        ui.label(RichText::new("Enter any hex color code or choose a tint:").color(t.text_dim).size(12.0));
+
+        ui.add_space(8.0);
+
+        // Preview circle + hex input
+        let parsed_color = theme::parse_hex_color(&state.custom_color_hex_input)
+            .or_else(|| crate::state::parse_color_str(&state.custom_color_hex_input))
+            .unwrap_or(t.accent);
+
+        ui.horizontal(|ui| {
+            let (rect, _) = ui.allocate_exact_size(vec2(28.0, 28.0), Sense::hover());
+            ui.painter().circle_filled(rect.center(), 12.0, parsed_color);
+            ui.painter().circle_stroke(rect.center(), 13.0, Stroke::new(1.5, t.field_border));
+
+            ui.add_space(6.0);
+
+            field_frame(&t).show(ui, |ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut state.custom_color_hex_input)
+                        .hint_text("#RRGGBB")
+                        .frame(Frame::NONE)
+                        .desired_width(120.0),
+                );
+            });
+        });
+
+        ui.add_space(8.0);
+        ui.label(RichText::new("Quick Swatches:").color(t.text_faint).size(11.0));
+        ui.horizontal_wrapped(|ui| {
+            for hex in [
+                "#f43f5e", "#ec4899", "#d946ef", "#a855f7", "#8b5cf6", "#6366f1",
+                "#3b82f6", "#0ea5e9", "#06b6d4", "#14b8a6", "#10b981", "#22c55e",
+                "#84cc16", "#eab308", "#f97316", "#ef4444", "#78716c", "#64748b",
+            ] {
+                let col = theme::parse_hex_color(hex).unwrap_or(Color32::GRAY);
+                let (rect, resp) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::click());
+                ui.painter().circle_filled(rect.center(), 7.0, col);
+                if state.custom_color_hex_input.eq_ignore_ascii_case(hex) {
+                    ui.painter().circle_stroke(rect.center(), 8.5, Stroke::new(1.5, t.text));
+                }
+                if resp.on_hover_text(hex).clicked() {
+                    state.custom_color_hex_input = hex.to_string();
+                }
+            }
+        });
+
+        ui.add_space(10.0);
+        ui.separator();
+        ui.add_space(6.0);
+
+        ui.label(RichText::new("Save to Favorites Palette (Optional):").color(t.text_dim).size(12.0));
+        ui.add_space(2.0);
+        field_frame(&t).show(ui, |ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut state.custom_color_name_input)
+                    .hint_text("Color Name (e.g. Electric Violet)")
+                    .frame(Frame::NONE)
+                    .desired_width(f32::INFINITY),
+            );
+        });
+
+        ui.add_space(14.0);
+
+        ui.horizontal(|ui| {
+            if ui.add(
+                egui::Button::new(RichText::new("Apply Color").color(Color32::WHITE).strong())
+                    .fill(t.accent)
+                    .stroke(Stroke::NONE)
+                    .corner_radius(CornerRadius::same(t.radius_sm as u8)),
+            ).clicked() {
+                should_apply = true;
+                should_close = true;
+            }
+
+            if theme::ghost_button(ui, &t, RichText::new("Cancel").color(t.text_dim)).clicked() {
+                should_close = true;
+            }
+        });
+    });
+
+    if should_apply {
+        let hex = state.custom_color_hex_input.trim().to_string();
+        let name_label = state.custom_color_name_input.trim().to_string();
+        let add_to_palette = !name_label.is_empty();
+        state.apply_custom_color(&hex, add_to_palette, if add_to_palette { Some(&name_label) } else { None });
+    }
+
+    if modal_resp.should_close() || should_close {
+        state.custom_color_target = None;
+    }
+}
+

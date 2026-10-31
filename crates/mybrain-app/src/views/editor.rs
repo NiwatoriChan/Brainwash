@@ -97,34 +97,27 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                             ui.set_min_width(220.0);
 
                             // Section 1: Note Color
-                            ui.label(RichText::new("Note Color:").size(11.0).color(t.text_faint));
-                            ui.horizontal_wrapped(|ui| {
-                                for (label, val, dot_col) in [
-                                    ("Red", Some("red"), Color32::from_rgb(0xff, 0x5a, 0x5a)),
-                                    ("Coral", Some("coral"), Color32::from_rgb(0xff, 0x7a, 0x59)),
-                                    ("Amber", Some("yellow"), Color32::from_rgb(0xff, 0xc1, 0x07)),
-                                    ("Green", Some("green"), Color32::from_rgb(0x4c, 0xaf, 0x50)),
-                                    ("Teal", Some("teal"), Color32::from_rgb(0x20, 0xc9, 0x97)),
-                                    ("Blue", Some("blue"), Color32::from_rgb(0x3a, 0x86, 0xff)),
-                                    ("Purple", Some("purple"), Color32::from_rgb(0x9d, 0x4e, 0xdd)),
-                                    ("Magenta", Some("magenta"), Color32::from_rgb(0xf7, 0x25, 0x85)),
-                                    ("Brown", Some("brown"), Color32::from_rgb(0x8d, 0x6e, 0x63)),
-                                ] {
-                                    if ui.button(RichText::new("●").color(dot_col).size(14.0)).on_hover_text(label).clicked() {
-                                        state.set_note_color(&active_id, val);
-                                        ui.close();
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new("Color:").size(11.5).color(t.text_faint));
+                                ui.add_space(4.0);
+                                let note_color_name = state.get_note_color_name(&active_id);
+                                if let Some(action) = theme::color_picker_dots(ui, &t, state.settings.effective_color_palette(), note_color_name.as_deref()) {
+                                    match action {
+                                        theme::ColorPickerAction::SetColor(c) => {
+                                            state.set_note_color(&active_id, c.as_deref());
+                                        }
+                                        theme::ColorPickerAction::OpenCustomColor => {
+                                            state.open_custom_color_picker(crate::state::CustomColorTarget::Note(active_id.clone()), note_color_name.as_deref());
+                                            ui.close();
+                                        }
                                     }
-                                }
-                                if ui.button(RichText::new("⊘").color(t.text_faint).size(13.0)).on_hover_text("Default (None)").clicked() {
-                                    state.set_note_color(&active_id, None);
-                                    ui.close();
                                 }
                             });
 
-                            ui.separator();
+                            ui.add_space(4.0);
 
                             // Section 2: Note Emoji
-                            ui.label(RichText::new("Note Emoji:").size(11.0).color(t.text_faint));
+                            ui.label(RichText::new("Emoji:").size(11.5).color(t.text_faint));
                             ui.horizontal_wrapped(|ui| {
                                 for em in ["📝", "📄", "💡", "🚀", "⭐", "📌", "🎯", "🔍", "🏷️", "💼", "📚", "🎨", "⚙️", "🌿", "⚡", "💬", "🧪", "📅"] {
                                     if ui.button(RichText::new(em).color(icon_color)).clicked() {
