@@ -13,7 +13,7 @@ use mybrain_core::note::NoteId;
 use mybrain_core::vault::Vault;
 
 use crate::plugins::{
-    MyBrainPlugin, PluginCommand, PluginContext, RibbonButton,
+    MyBrainPlugin, PluginCommand, PluginContext, PluginViewType, RibbonButton,
 };
 use crate::theme::{self, Tokens};
 
@@ -261,6 +261,10 @@ impl MyBrainPlugin for MarkdownPlugin {
 
     fn description(&self) -> &'static str {
         "Markdown editor and live preview with wiki-links, task toggles, syntax highlighting, and tabs"
+    }
+
+    fn view_type(&self) -> PluginViewType {
+        PluginViewType::MainWorkspace
     }
 
     fn ribbon_button(&self) -> Option<RibbonButton> {
