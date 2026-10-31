@@ -1,7 +1,22 @@
-use egui::{vec2, Color32, CornerRadius, CursorIcon, Frame, Id, Margin, RichText, ScrollArea, Stroke};
+//! Emoji picker modal overlay plugin for Brainwash.
 
-use crate::state::{AppState, EmojiPickerTarget};
+use egui::{vec2, Color32, CornerRadius, CursorIcon, Frame, Id, Margin, RichText, ScrollArea, Stroke};
+use mybrain_core::events_bus::AppEvent;
+use mybrain_core::frontmatter::Frontmatter;
+use mybrain_core::index::LinkIndex;
+use mybrain_core::note::NoteId;
+
+use crate::plugins::{MyBrainPlugin, PluginCommand, PluginContext, PluginViewType};
 use crate::theme::{self, Tokens};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EmojiPickerTarget {
+    InsertText,
+    Note(NoteId),
+    Folder(String),
+    NewFolderDialog,
+    NewNoteDialog,
+}
 
 pub struct EmojiDef {
     pub emoji: &'static str,
@@ -139,308 +154,349 @@ pub const EMOJI_DATABASE: &[EmojiDef] = &[
     EmojiDef { emoji: "🥇", name: "1st Medal", category: "Life", keywords: "medal first gold achievement" },
 ];
 
-pub fn show(ctx: &egui::Context, state: &mut AppState) {
-    let Some(target) = state.emoji_picker_target.clone() else {
-        return;
-    };
+pub struct EmojiPlugin {
+    pub search_query: String,
+    pub target: Option<EmojiPickerTarget>,
+    pub selected_category: Option<&'static str>,
+}
 
-    let t = Tokens::get(ctx);
-    let mut should_close = false;
-    let mut selected_emoji: Option<String> = None;
-    let mut should_clear = false;
-
-    let target_label = match &target {
-        EmojiPickerTarget::Note(id) => format!("For note: {}", id.name()),
-        EmojiPickerTarget::Folder(path) => format!("For folder: {}", path),
-        EmojiPickerTarget::NewFolderDialog => "For new folder".to_string(),
-        EmojiPickerTarget::NewNoteDialog => "For new note".to_string(),
-    };
-
-    let target_color = match &target {
-        EmojiPickerTarget::Note(id) => state.get_note_color(id),
-        EmojiPickerTarget::Folder(path) => state.get_folder_color(path),
-        EmojiPickerTarget::NewNoteDialog => state.new_note_color.as_deref().and_then(crate::state::parse_color_str),
-        EmojiPickerTarget::NewFolderDialog => state.new_folder_color.as_deref().and_then(crate::state::parse_color_str),
-    };
-    let glyph_color = target_color.unwrap_or(Color32::WHITE);
-
-    let modal = egui::Modal::new(Id::unique("searchable_emoji_picker_modal"))
-        .backdrop_color(Color32::from_black_alpha(150))
-        .frame(theme::modal_frame(&t));
-
-    let modal_resp = modal.show(ctx, |ui| {
-        ui.set_width(420.0);
-        ui.set_max_height(480.0);
-
-        // Header
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.heading(RichText::new("Choose Emoji").color(t.text).strong().size(16.0));
-                ui.label(RichText::new(target_label).color(t.accent_text).size(11.5));
-            });
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if theme::icon_close_button(ui, &t).clicked() {
-                    should_close = true;
-                }
-            });
-        });
-
-        ui.add_space(10.0);
-
-        // Search Bar
-        Frame::NONE
-            .fill(t.field)
-            .stroke(Stroke::new(1.0, t.field_border))
-            .corner_radius(CornerRadius::same(t.radius_sm as u8))
-            .inner_margin(Margin::symmetric(10, 6))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    theme::icon_search(ui, 13.0, t.text_faint);
-                    let edit = ui.add(
-                        egui::TextEdit::singleline(&mut state.emoji_picker_search)
-                            .hint_text("Search emojis… (e.g. star, book, check, code, folder)")
-                            .frame(Frame::NONE)
-                            .desired_width(ui.available_width() - 24.0),
-                    );
-                    edit.request_focus();
-
-                    if !state.emoji_picker_search.is_empty()
-                        && theme::icon_close_button(ui, &t).clicked()
-                    {
-                        state.emoji_picker_search.clear();
-                    }
-                });
-            });
-
-        ui.add_space(8.0);
-
-        // Category Filter Quick Chips
-        let query = state.emoji_picker_search.trim().to_lowercase();
-        let categories = ["All", "Folders", "Notes", "Projects", "Status", "Life"];
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-            for cat in categories {
-                let is_cat_active = if cat == "All" {
-                    query.is_empty()
-                } else {
-                    query == cat.to_lowercase()
-                };
-
-                let (bg, stroke, text_color) = if is_cat_active {
-                    (t.accent_soft, Stroke::new(1.0, t.accent_border), t.accent_text)
-                } else {
-                    (t.field, Stroke::new(1.0, t.field_border), t.text_dim)
-                };
-
-                let mut rt = RichText::new(cat).size(11.0).color(text_color);
-                if is_cat_active {
-                    rt = rt.strong();
-                }
-
-                if ui
-                    .add(
-                        egui::Button::new(rt)
-                            .fill(bg)
-                            .stroke(stroke)
-                            .corner_radius(CornerRadius::same(t.radius_sm as u8)),
-                    )
-                    .clicked()
-                {
-                    if cat == "All" {
-                        state.emoji_picker_search.clear();
-                    } else {
-                        state.emoji_picker_search = cat.to_lowercase();
-                    }
-                }
-            }
-        });
-
-        ui.add_space(8.0);
-
-        // Color selector row (same as quick capture)
-        let curr_color_name: Option<String> = match &target {
-            EmojiPickerTarget::Note(id) => state.get_note_color_name(id),
-            EmojiPickerTarget::Folder(path) => state.get_folder_color_name(path),
-            EmojiPickerTarget::NewNoteDialog => state.new_note_color.clone(),
-            EmojiPickerTarget::NewFolderDialog => state.new_folder_color.clone(),
-        };
-
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Color:").size(12.0).color(t.text_dim));
-            ui.add_space(4.0);
-            if let Some(action) = theme::color_picker_dots(ui, &t, state.settings.effective_color_palette(), curr_color_name.as_deref()) {
-                match action {
-                    theme::ColorPickerAction::SetColor(new_color) => {
-                        match &target {
-                            EmojiPickerTarget::Note(id) => {
-                                state.set_note_color(id, new_color.as_deref());
-                            }
-                            EmojiPickerTarget::Folder(path) => {
-                                state.set_folder_color(path, new_color.as_deref());
-                            }
-                            EmojiPickerTarget::NewNoteDialog => {
-                                state.new_note_color = new_color;
-                            }
-                            EmojiPickerTarget::NewFolderDialog => {
-                                state.new_folder_color = new_color;
-                            }
-                        }
-                    }
-                    theme::ColorPickerAction::OpenCustomColor => {
-                        let custom_target = match &target {
-                            EmojiPickerTarget::Note(id) => crate::state::CustomColorTarget::Note(id.clone()),
-                            EmojiPickerTarget::Folder(path) => crate::state::CustomColorTarget::Folder(path.clone()),
-                            EmojiPickerTarget::NewNoteDialog => crate::state::CustomColorTarget::NewNoteDialog,
-                            EmojiPickerTarget::NewFolderDialog => crate::state::CustomColorTarget::NewFolderDialog,
-                        };
-                        state.open_custom_color_picker(custom_target, curr_color_name.as_deref());
-                    }
-                }
-            }
-        });
-
-        ui.add_space(6.0);
-        ui.label(RichText::new("Emoji:").size(12.0).color(t.text_dim));
-        ui.add_space(2.0);
-
-        // Filter database
-        let filtered: Vec<&EmojiDef> = EMOJI_DATABASE
-            .iter()
-            .filter(|item| {
-                if query.is_empty() {
-                    true
-                } else {
-                    item.name.to_lowercase().contains(&query)
-                        || item.category.to_lowercase().contains(&query)
-                        || item.keywords.to_lowercase().contains(&query)
-                }
-            })
-            .collect();
-
-        // Emojis Grid
-        ScrollArea::vertical()
-            .id_salt("emoji_picker_scroll")
-            .max_height(260.0)
-            .show(ui, |ui| {
-                if filtered.is_empty() {
-                    ui.add_space(20.0);
-                    ui.vertical_centered(|ui| {
-                        ui.label(RichText::new("No matching emojis found").color(t.text_faint).size(12.5));
-                    });
-                    ui.add_space(20.0);
-                } else {
-                    let col_count = 8;
-                    let btn_size = vec2(38.0, 36.0);
-
-                    for chunk in filtered.chunks(col_count) {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-                            for def in chunk {
-                                let (rect, resp) = ui.allocate_exact_size(btn_size, egui::Sense::click());
-                                let hovered = resp.hovered();
-                                if hovered {
-                                    ui.painter().rect_filled(
-                                        rect,
-                                        CornerRadius::same(t.radius_sm as u8),
-                                        t.hover,
-                                    );
-                                    ui.painter().rect_stroke(
-                                        rect,
-                                        CornerRadius::same(t.radius_sm as u8),
-                                        Stroke::new(1.0, t.card_border),
-                                        egui::StrokeKind::Inside,
-                                    );
-                                }
-
-                                ui.painter().text(
-                                    rect.center(),
-                                    egui::Align2::CENTER_CENTER,
-                                    def.emoji,
-                                    egui::FontId::proportional(18.0),
-                                    glyph_color,
-                                );
-
-                                if resp
-                                    .on_hover_cursor(CursorIcon::PointingHand)
-                                    .on_hover_text(format!("{} ({})", def.name, def.category))
-                                    .clicked()
-                                {
-                                    selected_emoji = Some(def.emoji.to_string());
-                                    should_close = true;
-                                }
-                            }
-                        });
-                        ui.add_space(2.0);
-                    }
-                }
-            });
-
-        ui.add_space(10.0);
-        theme::bottom_hairline(ui, ui.max_rect(), &t);
-        ui.add_space(8.0);
-
-        // Footer Actions
-        ui.horizontal(|ui| {
-            if ui
-                .button(RichText::new("Clear / Default").color(t.text_dim).size(12.0))
-                .on_hover_text("Remove custom emoji")
-                .clicked()
-            {
-                should_clear = true;
-                should_close = true;
-            }
-
-            let count_label = format!("{} emojis", filtered.len());
-            ui.label(RichText::new(count_label).color(t.text_faint).size(11.0));
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if theme::ghost_button(ui, &t, RichText::new("Cancel").color(t.text_dim)).clicked() {
-                    should_close = true;
-                }
-            });
-        });
-    });
-
-    if let Some(emoji) = selected_emoji {
-        match &target {
-            EmojiPickerTarget::Note(id) => {
-                state.set_note_emoji(id, Some(&emoji));
-                state.set_status(format!("Set note icon to {emoji}"));
-            }
-            EmojiPickerTarget::Folder(path) => {
-                state.set_folder_emoji(path, Some(&emoji));
-                state.set_status(format!("Set folder icon to {emoji}"));
-            }
-            EmojiPickerTarget::NewFolderDialog => {
-                state.new_folder_emoji = Some(emoji);
-            }
-            EmojiPickerTarget::NewNoteDialog => {
-                state.new_note_emoji = Some(emoji);
-            }
+impl EmojiPlugin {
+    pub fn new() -> Self {
+        Self {
+            search_query: String::new(),
+            target: None,
+            selected_category: None,
         }
-    } else if should_clear {
-        match &target {
-            EmojiPickerTarget::Note(id) => {
-                state.set_note_emoji(id, None);
-                state.set_status("Cleared note icon");
-            }
-            EmojiPickerTarget::Folder(path) => {
-                state.set_folder_emoji(path, None);
-                state.set_status("Reset folder icon to default");
-            }
-            EmojiPickerTarget::NewFolderDialog => {
-                state.new_folder_emoji = None;
-            }
-            EmojiPickerTarget::NewNoteDialog => {
-                state.new_note_emoji = None;
+    }
+
+    pub fn open_for(&mut self, target: EmojiPickerTarget) {
+        self.target = Some(target);
+        self.search_query.clear();
+        self.selected_category = None;
+    }
+}
+
+impl Default for EmojiPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MyBrainPlugin for EmojiPlugin {
+    fn id(&self) -> &'static str {
+        "core.emoji"
+    }
+
+    fn name(&self) -> &'static str {
+        "Emoji Picker"
+    }
+
+    fn description(&self) -> &'static str {
+        "Search and insert emojis into notes or customize folder and note icons"
+    }
+
+    fn view_type(&self) -> PluginViewType {
+        PluginViewType::ModalOverlay
+    }
+
+    fn commands(&self) -> Vec<PluginCommand> {
+        vec![PluginCommand {
+            id: "insert_emoji".into(),
+            title: "Insert Emoji".into(),
+            shortcut: None,
+            plugin_id: "core.emoji",
+        }]
+    }
+
+    fn execute_command(&mut self, command_id: &str, _ctx: &mut PluginContext) {
+        if command_id == "insert_emoji" {
+            self.open_for(EmojiPickerTarget::InsertText);
+        }
+    }
+
+    fn on_event(&mut self, event: &AppEvent, _ctx: &mut PluginContext) {
+        if let AppEvent::OpenModal(ref modal_id) = event {
+            if modal_id == "emoji_picker" {
+                self.open_for(EmojiPickerTarget::InsertText);
+            } else if let Some(note_str) = modal_id.strip_prefix("emoji_note:") {
+                if let Ok(id) = NoteId::new(note_str) {
+                    self.open_for(EmojiPickerTarget::Note(id));
+                }
+            } else if let Some(folder_str) = modal_id.strip_prefix("emoji_folder:") {
+                self.open_for(EmojiPickerTarget::Folder(folder_str.to_string()));
             }
         }
     }
 
-    if modal_resp.should_close() || should_close {
-        state.emoji_picker_target = None;
-        state.emoji_picker_search.clear();
+    fn render_modal(&mut self, ctx_egui: &egui::Context, ctx: &mut PluginContext) {
+        let Some(target) = self.target.clone() else {
+            return;
+        };
+
+        let t = Tokens::get(ctx_egui);
+        let mut should_close = false;
+        let mut selected_emoji: Option<String> = None;
+        let mut should_clear = false;
+
+        let target_label = match &target {
+            EmojiPickerTarget::InsertText => "Insert into editor".to_string(),
+            EmojiPickerTarget::Note(id) => format!("For note: {}", id.name()),
+            EmojiPickerTarget::Folder(path) => format!("For folder: {}", path),
+            EmojiPickerTarget::NewFolderDialog => "For new folder".to_string(),
+            EmojiPickerTarget::NewNoteDialog => "For new note".to_string(),
+        };
+
+        let modal = egui::Modal::new(Id::unique("searchable_emoji_picker_modal"))
+            .backdrop_color(Color32::from_black_alpha(150))
+            .frame(theme::modal_frame(&t));
+
+        let modal_resp = modal.show(ctx_egui, |ui| {
+            ui.set_width(420.0);
+            ui.set_max_height(480.0);
+
+            // Header
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.heading(RichText::new("Choose Emoji").color(t.text).strong().size(16.0));
+                    ui.label(RichText::new(target_label).color(t.accent_text).size(11.5));
+                });
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if theme::icon_close_button(ui, &t).clicked() {
+                        should_close = true;
+                    }
+                });
+            });
+
+            ui.add_space(10.0);
+
+            // Search Bar
+            Frame::NONE
+                .fill(t.field)
+                .stroke(Stroke::new(1.0, t.field_border))
+                .corner_radius(CornerRadius::same(t.radius_sm as u8))
+                .inner_margin(Margin::symmetric(10, 6))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        theme::icon_search(ui, 13.0, t.text_faint);
+                        let edit = ui.add(
+                            egui::TextEdit::singleline(&mut self.search_query)
+                                .hint_text("Search emojis… (e.g. star, book, check, code, folder)")
+                                .frame(Frame::NONE)
+                                .desired_width(ui.available_width() - 24.0),
+                        );
+                        edit.request_focus();
+
+                        if !self.search_query.is_empty()
+                            && theme::icon_close_button(ui, &t).clicked()
+                        {
+                            self.search_query.clear();
+                        }
+                    });
+                });
+
+            ui.add_space(8.0);
+
+            // Category Filter Quick Chips
+            let query = self.search_query.trim().to_lowercase();
+            let categories = ["All", "Folders", "Notes", "Projects", "Status", "Life"];
+
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                for cat in categories {
+                    let is_sel = if cat == "All" {
+                        self.selected_category.is_none() && query.is_empty()
+                    } else {
+                        self.selected_category == Some(cat)
+                    };
+
+                    let bg = if is_sel { t.accent.gamma_multiply(0.2) } else { t.field };
+                    let border = if is_sel { t.accent } else { t.field_border };
+                    let fg = if is_sel { t.accent_text } else { t.text_dim };
+
+                    let resp = ui.add(
+                        egui::Button::new(RichText::new(cat).size(11.5).color(fg))
+                            .fill(bg)
+                            .stroke(Stroke::new(1.0, border))
+                            .corner_radius(CornerRadius::same(t.radius_sm as u8))
+                            .min_size(vec2(0.0, 22.0)),
+                    );
+
+                    if resp.clicked() {
+                        if cat == "All" {
+                            self.selected_category = None;
+                            self.search_query.clear();
+                        } else {
+                            self.selected_category = Some(cat);
+                        }
+                    }
+                }
+            });
+
+            ui.add_space(8.0);
+            theme::bottom_hairline(ui, ui.max_rect(), &t);
+            ui.add_space(8.0);
+
+            // Filter emojis
+            let filtered: Vec<&'static EmojiDef> = EMOJI_DATABASE
+                .iter()
+                .filter(|def| {
+                    if let Some(cat) = self.selected_category {
+                        if !def.category.eq_ignore_ascii_case(cat) {
+                            return false;
+                        }
+                    }
+                    if !query.is_empty() {
+                        let name_m = def.name.to_lowercase().contains(&query);
+                        let kw_m = def.keywords.to_lowercase().contains(&query);
+                        let cat_m = def.category.to_lowercase().contains(&query);
+                        name_m || kw_m || cat_m
+                    } else {
+                        true
+                    }
+                })
+                .collect();
+
+            // Emoji Grid
+            ScrollArea::vertical()
+                .max_height(260.0)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    if filtered.is_empty() {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(30.0);
+                            ui.label(RichText::new("No emojis match your search").color(t.text_faint).size(13.0));
+                        });
+                    } else {
+                        let cols = 8;
+                        let item_size = vec2(42.0, 42.0);
+
+                        egui::Grid::new("emoji_picker_grid")
+                            .spacing(vec2(4.0, 4.0))
+                            .show(ui, |ui| {
+                                for (idx, def) in filtered.iter().enumerate() {
+                                    let resp = ui.add(
+                                        egui::Button::new(
+                                            RichText::new(def.emoji).size(20.0),
+                                        )
+                                        .fill(t.field)
+                                        .stroke(Stroke::new(1.0, t.field_border))
+                                        .corner_radius(CornerRadius::same(t.radius_sm as u8))
+                                        .min_size(item_size),
+                                    )
+                                    .on_hover_cursor(CursorIcon::PointingHand)
+                                    .on_hover_ui(|ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new(def.emoji).size(18.0));
+                                            ui.vertical(|ui| {
+                                                ui.label(RichText::new(def.name).strong().color(t.text).size(12.0));
+                                                ui.label(RichText::new(def.category).color(t.text_faint).size(10.5));
+                                            });
+                                        });
+                                    });
+
+                                    if resp.clicked() {
+                                        selected_emoji = Some(def.emoji.to_string());
+                                        should_close = true;
+                                    }
+
+                                    if (idx + 1) % cols == 0 {
+                                        ui.end_row();
+                                    }
+                                }
+                            });
+                    }
+                });
+
+            ui.add_space(10.0);
+            theme::bottom_hairline(ui, ui.max_rect(), &t);
+            ui.add_space(8.0);
+
+            // Footer actions: Reset / Remove icon
+            ui.horizontal(|ui| {
+                if matches!(target, EmojiPickerTarget::Folder(_) | EmojiPickerTarget::Note(_)) {
+                    if theme::ghost_button(ui, &t, RichText::new("Remove custom icon").color(t.danger).size(12.0)).clicked() {
+                        should_clear = true;
+                        should_close = true;
+                    }
+                }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if theme::ghost_button(ui, &t, "Cancel").clicked() {
+                        should_close = true;
+                    }
+                });
+            });
+        });
+
+        if let Some(emoji) = selected_emoji {
+            match target {
+                EmojiPickerTarget::InsertText => {
+                    ctx.emit(AppEvent::InsertText(emoji));
+                }
+                EmojiPickerTarget::Note(ref id) => {
+                    if let Some(note) = ctx.vault.get(id) {
+                        let (mut fm, body) = Frontmatter::parse(&note.content);
+                        fm.set("icon", emoji.trim());
+                        let new_content = if fm.is_empty() {
+                            body.trim_start_matches('\n').to_string()
+                        } else {
+                            format!("{}{}", fm.render(), body.trim_start_matches('\n'))
+                        };
+                        let _ = ctx.vault.save(id, &new_content);
+                        *ctx.index = LinkIndex::build(ctx.vault);
+                        ctx.emit(AppEvent::NoteModified(id.clone()));
+                    }
+                    ctx.toast(format!("Set note icon to {emoji}"));
+                }
+                EmojiPickerTarget::Folder(ref path) => {
+                    let clean = path.trim_end_matches('/').to_string();
+                    ctx.settings.folder_emojis.insert(clean, emoji.clone());
+                    let _ = ctx.settings.save_to_file(&std::path::PathBuf::from("settings.json"));
+                    ctx.toast(format!("Set folder icon to {emoji}"));
+                }
+                EmojiPickerTarget::NewFolderDialog => {
+                    // Signal to shell dialogs
+                    ctx.emit(AppEvent::StatusMessage(format!("EMOJI_NEW_FOLDER:{emoji}")));
+                }
+                EmojiPickerTarget::NewNoteDialog => {
+                    // Signal to shell dialogs
+                    ctx.emit(AppEvent::StatusMessage(format!("EMOJI_NEW_NOTE:{emoji}")));
+                }
+            }
+        }
+
+        if should_clear {
+            match target {
+                EmojiPickerTarget::Note(ref id) => {
+                    if let Some(note) = ctx.vault.get(id) {
+                        let (mut fm, body) = Frontmatter::parse(&note.content);
+                        fm.remove("icon");
+                        let new_content = if fm.is_empty() {
+                            body.trim_start_matches('\n').to_string()
+                        } else {
+                            format!("{}{}", fm.render(), body.trim_start_matches('\n'))
+                        };
+                        let _ = ctx.vault.save(id, &new_content);
+                        *ctx.index = LinkIndex::build(ctx.vault);
+                        ctx.emit(AppEvent::NoteModified(id.clone()));
+                    }
+                    ctx.toast("Reset note icon to default");
+                }
+                EmojiPickerTarget::Folder(ref path) => {
+                    let clean = path.trim_end_matches('/').to_string();
+                    ctx.settings.folder_emojis.remove(&clean);
+                    let _ = ctx.settings.save_to_file(&std::path::PathBuf::from("settings.json"));
+                    ctx.toast("Reset folder icon to default");
+                }
+                _ => {}
+            }
+        }
+
+        if modal_resp.should_close() || should_close {
+            self.target = None;
+            self.search_query.clear();
+        }
     }
 }
 
@@ -451,7 +507,6 @@ mod tests {
     #[test]
     fn test_emoji_database_completeness() {
         assert!(EMOJI_DATABASE.len() > 100);
-        // Verify common emojis exist
         assert!(EMOJI_DATABASE.iter().any(|e| e.emoji == "📁"));
         assert!(EMOJI_DATABASE.iter().any(|e| e.emoji == "📝"));
         assert!(EMOJI_DATABASE.iter().any(|e| e.emoji == "🚀"));
@@ -473,7 +528,6 @@ mod tests {
         assert!(!matches.is_empty());
         assert!(matches.iter().any(|e| e.emoji == "🚀"));
 
-        // Search category "Folders"
         let folder_matches: Vec<_> = EMOJI_DATABASE
             .iter()
             .filter(|e| e.category.eq_ignore_ascii_case("Folders"))
@@ -481,4 +535,3 @@ mod tests {
         assert!(folder_matches.len() >= 10);
     }
 }
-

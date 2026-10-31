@@ -58,6 +58,29 @@ impl ThemeKind {
         let i = Self::ALL.iter().position(|k| *k == self).unwrap_or(0);
         Self::ALL[(i + 1) % Self::ALL.len()]
     }
+
+    pub fn from_str_or_default(s: &str) -> Self {
+        match s.to_ascii_lowercase().as_str() {
+            "studio" => Self::Studio,
+            "studiolight" | "studio_light" | "light" => Self::StudioLight,
+            "pro" => Self::Pro,
+            "solarizeddark" | "solarized_dark" => Self::SolarizedDark,
+            "adwaitadark" | "adwaita_dark" => Self::AdwaitaDark,
+            _ => Self::default(),
+        }
+    }
+}
+
+impl std::fmt::Display for ThemeKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ThemeKind::Studio => write!(f, "Studio"),
+            ThemeKind::StudioLight => write!(f, "StudioLight"),
+            ThemeKind::Pro => write!(f, "Pro"),
+            ThemeKind::SolarizedDark => write!(f, "SolarizedDark"),
+            ThemeKind::AdwaitaDark => write!(f, "AdwaitaDark"),
+        }
+    }
 }
 
 /// Colour and shape tokens adapted directly from PhotoCraft.
@@ -430,6 +453,38 @@ pub fn parse_hex_color(hex_str: &str) -> Option<Color32> {
     None
 }
 
+/// Parse a color string (named color or hex) into Color32.
+pub fn parse_color_str(color_str: &str) -> Option<Color32> {
+    let s = color_str.trim();
+    if s.is_empty() || s.eq_ignore_ascii_case("default") {
+        return None;
+    }
+    match s.to_ascii_lowercase().as_str() {
+        "coral" => Some(Color32::from_rgb(235, 87, 87)),
+        "peach" => Some(Color32::from_rgb(242, 153, 74)),
+        "sand" => Some(Color32::from_rgb(242, 201, 76)),
+        "mint" => Some(Color32::from_rgb(39, 174, 96)),
+        "sage" => Some(Color32::from_rgb(78, 140, 110)),
+        "teal" => Some(Color32::from_rgb(45, 156, 219)),
+        "sky" | "fog" => Some(Color32::from_rgb(86, 204, 242)),
+        "storm" => Some(Color32::from_rgb(47, 128, 237)),
+        "dusk" => Some(Color32::from_rgb(111, 82, 216)),
+        "lavender" => Some(Color32::from_rgb(155, 81, 224)),
+        "pink" | "blossom" => Some(Color32::from_rgb(235, 87, 137)),
+        "clay" => Some(Color32::from_rgb(180, 130, 100)),
+        "amber" => Some(Color32::from_rgb(217, 119, 6)),
+        "violet" => Some(Color32::from_rgb(124, 58, 237)),
+        _ => {
+            for def in mybrain_core::settings::default_color_palette() {
+                if def.name.eq_ignore_ascii_case(s) {
+                    return parse_hex_color(&def.hex);
+                }
+            }
+            parse_hex_color(s)
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ColorPickerAction {
     SetColor(Option<String>),
@@ -486,7 +541,7 @@ pub fn color_picker_dots(
             .unwrap_or(false);
 
         let custom_color32 = if is_custom_selected {
-            current_color.and_then(crate::state::parse_color_str)
+            current_color.and_then(parse_color_str)
         } else {
             None
         };
@@ -930,65 +985,6 @@ pub fn paint_folder_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
         ],
         stroke,
     );
-}
-
-/// Icon-based segmented switcher for the main view modes (Notes pencil, Calendar, Graph).
-pub fn top_mode_segmented(
-    ui: &mut Ui,
-    t: &Tokens,
-    current: crate::state::TopBarMode,
-) -> Option<crate::state::TopBarMode> {
-    use crate::state::TopBarMode;
-    let mut clicked = None;
-    Frame::NONE
-        .fill(t.field)
-        .stroke(Stroke::new(1.0, t.separator))
-        .corner_radius(CornerRadius::same(t.radius as u8))
-        .inner_margin(Margin::same(2))
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            ui.horizontal(|ui| {
-                let modes = [
-                    (TopBarMode::Notes, "Notes (Editor) — Ctrl+1", "notes"),
-                    (TopBarMode::Calendar, "Calendar — Ctrl+2", "calendar"),
-                    (TopBarMode::Graph, "Knowledge Graph — Ctrl+3", "graph"),
-                ];
-
-                for (mode, tooltip, icon_name) in modes {
-                    let selected = mode == current;
-                    let size = vec2(34.0, 26.0);
-                    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
-                    let radius = CornerRadius::same((t.radius as u8).saturating_sub(2));
-                    let color = if selected {
-                        ui.painter().rect_filled(rect, radius, t.card);
-                        ui.painter().rect_stroke(
-                            rect,
-                            radius,
-                            Stroke::new(1.0, t.card_border),
-                            egui::StrokeKind::Inside,
-                        );
-                        t.accent_text
-                    } else if resp.hovered() {
-                        ui.painter().rect_filled(rect, radius, t.hover);
-                        t.text
-                    } else {
-                        t.text_dim
-                    };
-
-                    match icon_name {
-                        "notes" => paint_pencil_icon(ui.painter(), rect, color),
-                        "calendar" => paint_calendar_icon(ui.painter(), rect, color),
-                        "graph" => paint_graph_icon(ui.painter(), rect, color),
-                        _ => {}
-                    }
-
-                    if resp.on_hover_cursor(CursorIcon::PointingHand).on_hover_text(tooltip).clicked() {
-                        clicked = Some(mode);
-                    }
-                }
-            });
-        });
-    clicked
 }
 
 /// Actions triggered by the custom title bar window buttons.

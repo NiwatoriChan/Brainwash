@@ -38,6 +38,12 @@ pub struct AppSettings {
     /// Customizable favorite color palette for notes, folders, and emojis.
     #[serde(default = "default_color_palette")]
     pub color_palette: Vec<ColorDef>,
+    /// Dynamically enabled plugins keyed by plugin ID.
+    #[serde(default)]
+    pub enabled_plugins: std::collections::HashMap<String, bool>,
+    /// Custom configuration JSON objects per plugin ID.
+    #[serde(default)]
+    pub plugin_configs: std::collections::HashMap<String, serde_json::Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,11 +83,22 @@ impl Default for AppSettings {
             folder_emojis: BTreeMap::new(),
             folder_colors: BTreeMap::new(),
             color_palette: default_color_palette(),
+            enabled_plugins: std::collections::HashMap::new(),
+            plugin_configs: std::collections::HashMap::new(),
         }
     }
 }
 
 impl AppSettings {
+    /// Checks whether a plugin is enabled. Built-in plugins default to `true` if not explicitly disabled.
+    pub fn is_plugin_enabled(&self, plugin_id: &str) -> bool {
+        self.enabled_plugins.get(plugin_id).copied().unwrap_or(true)
+    }
+
+    /// Sets the enabled state of a plugin.
+    pub fn set_plugin_enabled(&mut self, plugin_id: &str, enabled: bool) {
+        self.enabled_plugins.insert(plugin_id.to_string(), enabled);
+    }
     pub fn effective_color_palette(&self) -> &[ColorDef] {
         if self.color_palette.is_empty() {
             static DEFAULT: std::sync::OnceLock<Vec<ColorDef>> = std::sync::OnceLock::new();

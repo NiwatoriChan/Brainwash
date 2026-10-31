@@ -279,6 +279,12 @@ impl Default for EventStore {
 }
 
 impl EventStore {
+    pub fn new(folder: impl Into<String>) -> Self {
+        Self {
+            folder: folder.into(),
+        }
+    }
+
     /// Appends an event object block to an existing note.
     pub fn append_to_note(&self, vault: &mut Vault, note_id: &NoteId, draft: &EventDraft) -> Result<()> {
         draft.validate()?;

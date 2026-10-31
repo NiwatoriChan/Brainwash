@@ -1,28 +1,43 @@
-//! Vault management and switcher dialog.
-//!
-//! Allows switching to another vault folder, viewing recent vaults,
-//! or creating a new vault on disk without restarting the application.
+//! Vault switcher modal dialog.
 
 use std::path::PathBuf;
 use egui::{Color32, CornerRadius, Frame, Id, Margin, RichText, Stroke};
 
-use crate::state::AppState;
+use crate::plugins::PluginContext;
 use crate::theme::{self, Tokens};
 
-pub fn show(ctx: &egui::Context, state: &mut AppState) {
-    if !state.show_vault_dialog {
+pub struct VaultSwitcherState {
+    pub is_open: bool,
+    pub input_path: String,
+}
+
+impl Default for VaultSwitcherState {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            input_path: String::new(),
+        }
+    }
+}
+
+pub fn render_vault_switcher(
+    ctx_egui: &egui::Context,
+    switcher_state: &mut VaultSwitcherState,
+    ctx: &mut PluginContext,
+    switch_vault_req: &mut Option<PathBuf>,
+) {
+    if !switcher_state.is_open {
         return;
     }
 
-    let t = Tokens::get(ctx);
+    let t = Tokens::get(ctx_egui);
     let modal = egui::Modal::new(Id::unique("vault_switcher_modal"))
         .backdrop_color(Color32::from_black_alpha(150))
         .frame(theme::modal_frame(&t));
 
     let mut should_close = false;
-    let mut switch_to_path: Option<PathBuf> = None;
 
-    let modal_resp = modal.show(ctx, |ui| {
+    let modal_resp = modal.show(ctx_egui, |ui| {
         ui.set_width(480.0);
 
         // Header
@@ -41,7 +56,7 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
 
         // Current active vault
         ui.label(RichText::new("CURRENT VAULT").color(t.text_faint).size(11.0).strong());
-        let current_path = state.vault.root().display().to_string();
+        let current_path = ctx.vault.root().display().to_string();
         Frame::NONE
             .fill(t.field)
             .corner_radius(CornerRadius::same(t.radius_sm as u8))
@@ -60,7 +75,7 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
         ui.label(RichText::new("OPEN FOLDER AS VAULT").color(t.text_faint).size(11.0).strong());
         ui.horizontal(|ui| {
             ui.add(
-                egui::TextEdit::singleline(&mut state.vault_path_input)
+                egui::TextEdit::singleline(&mut switcher_state.input_path)
                     .hint_text("/path/to/notes/folder")
                     .desired_width(ui.available_width() - 80.0),
             );
@@ -73,9 +88,10 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
                 )
                 .clicked()
             {
-                let input = state.vault_path_input.trim();
+                let input = switcher_state.input_path.trim();
                 if !input.is_empty() {
-                    switch_to_path = Some(PathBuf::from(input));
+                    *switch_vault_req = Some(PathBuf::from(input));
+                    should_close = true;
                 }
             }
         });
@@ -83,13 +99,13 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
         ui.add_space(14.0);
 
         // Recent vaults list
-        if !state.settings.recent_vaults.is_empty() {
+        if !ctx.settings.recent_vaults.is_empty() {
             ui.label(RichText::new("RECENT VAULTS").color(t.text_faint).size(11.0).strong());
             ui.add_space(4.0);
 
             let card = theme::card_frame(&t, false).inner_margin(Margin::symmetric(8, 4));
             card.show(ui, |ui| {
-                for recent in &state.settings.recent_vaults {
+                for recent in &ctx.settings.recent_vaults {
                     let is_current = recent == &current_path;
                     let folder_name = PathBuf::from(recent)
                         .file_name()
@@ -98,28 +114,21 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
 
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(if is_current { "✓" } else { "📁" }).color(if is_current { t.success } else { t.text_dim }));
-                        let btn = ui.selectable_label(is_current, RichText::new(&folder_name).color(t.text));
-                        if btn.clicked() && !is_current {
-                            switch_to_path = Some(PathBuf::from(recent));
+                        let btn = egui::Button::new(RichText::new(&folder_name).strong().color(if is_current { t.accent_text } else { t.text }))
+                            .frame(false);
+                        if ui.add(btn).clicked() && !is_current {
+                            *switch_vault_req = Some(PathBuf::from(recent));
+                            should_close = true;
                         }
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(RichText::new(recent).color(t.text_faint).monospace().size(10.5));
-                        });
+                        ui.label(RichText::new(recent).color(t.text_faint).size(11.0));
                     });
                 }
             });
         }
     });
 
-    if let Some(path) = switch_to_path {
-        if let Err(e) = state.switch_vault(path) {
-            state.set_status(format!("Error opening vault: {e}"));
-        } else {
-            should_close = true;
-        }
-    }
-
     if modal_resp.should_close() || should_close {
-        state.show_vault_dialog = false;
+        switcher_state.is_open = false;
+        switcher_state.input_path.clear();
     }
 }
