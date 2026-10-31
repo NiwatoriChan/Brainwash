@@ -298,9 +298,47 @@ pub fn section_label(ui: &mut Ui, t: &Tokens, text: &str) {
     );
 }
 
+/// Checks if a string begins with an emoji, returning the emoji substring and the remainder of the text.
+pub fn split_leading_emoji(s: &str) -> Option<(&str, &str)> {
+    let mut chars = s.chars().peekable();
+    let first = *chars.peek()?;
+    let is_emoji_char = |c: char| {
+        (c >= '\u{1F000}' && c <= '\u{1FAFF}')
+            || (c >= '\u{2600}' && c <= '\u{27BF}')
+            || (c >= '\u{2300}' && c <= '\u{23FF}')
+            || (c >= '\u{2B50}' && c <= '\u{2B55}')
+            || c == '\u{FE0E}'
+            || c == '\u{FE0F}'
+            || c == '\u{200D}'
+    };
+
+    if !is_emoji_char(first) || first == '\u{FE0E}' || first == '\u{FE0F}' || first == '\u{200D}' {
+        return None;
+    }
+
+    let mut byte_len = 0;
+    while let Some(&c) = chars.peek() {
+        if is_emoji_char(c) {
+            byte_len += c.len_utf8();
+            chars.next();
+        } else {
+            break;
+        }
+    }
+
+    if byte_len == 0 {
+        return None;
+    }
+
+    let emoji = &s[..byte_len];
+    let rest = s[byte_len..].trim_start();
+    Some((emoji, rest))
+}
+
 /// Full-width, single-line clickable list row with hover / selected states.
 ///
-/// * `dot`: optional coloured bullet on the left.
+/// * `dot`: optional coloured bullet on the left. If `title` begins with an emoji,
+///   the emoji itself is rendered directly in `dot`'s colour, merging the icon and colour.
 /// * `trailing`: optional faint text right-aligned (e.g. folder name).
 pub fn list_row(
     ui: &mut Ui,
@@ -330,11 +368,6 @@ pub fn list_row(
         }
 
         let mut x = rect.left() + 10.0;
-        if let Some(c) = dot {
-            painter.circle_filled(pos2(x + 3.0, rect.center().y), 3.0, c);
-            x += 14.0;
-        }
-
         let mut right = rect.right() - 8.0;
         if let Some(trail) = trailing {
             let g = truncated_galley(ui, trail, FontId::proportional(10.5), t.text_faint, 90.0);
@@ -344,8 +377,37 @@ pub fn list_row(
         }
 
         let color = if selected { t.text } else if resp.hovered() { t.text } else { t.text_dim };
-        let g = truncated_galley(ui, title, FontId::proportional(13.0), color, right - x);
-        painter.galley(pos2(x, rect.center().y - g.size().y / 2.0), g, color);
+
+        if let Some((emoji, rest)) = split_leading_emoji(title) {
+            // Merge color and emoji: tint emoji with chosen dot color directly, omitting redundant circle dot.
+            let emoji_color = dot.unwrap_or(color);
+            let mut job = LayoutJob::default();
+            job.append(
+                emoji,
+                0.0,
+                TextFormat::simple(FontId::proportional(13.0), emoji_color),
+            );
+            job.append(
+                " ",
+                0.0,
+                TextFormat::simple(FontId::proportional(13.0), color),
+            );
+            job.append(
+                rest,
+                0.0,
+                TextFormat::simple(FontId::proportional(13.0), color),
+            );
+            job.wrap = TextWrapping::truncate_at_width((right - x).max(0.0));
+            let g = ui.ctx().fonts_mut(|f| f.layout_job(job));
+            painter.galley(pos2(x, rect.center().y - g.size().y / 2.0), g, color);
+        } else {
+            if let Some(c) = dot {
+                painter.circle_filled(pos2(x + 3.0, rect.center().y), 3.0, c);
+                x += 14.0;
+            }
+            let g = truncated_galley(ui, title, FontId::proportional(13.0), color, right - x);
+            painter.galley(pos2(x, rect.center().y - g.size().y / 2.0), g, color);
+        }
     }
 
     resp.on_hover_cursor(CursorIcon::PointingHand)
@@ -1221,4 +1283,20 @@ pub fn apply_theme(ctx: &egui::Context, kind: ThemeKind) {
     let style = ctx.global_style();
     ctx.set_style_of(egui::Theme::Light, Arc::clone(&style));
     ctx.set_style_of(egui::Theme::Dark, style);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_split_leading_emoji() {
+        assert_eq!(split_leading_emoji("📝 Note"), Some(("📝", "Note")));
+        assert_eq!(split_leading_emoji("🚀 Launch"), Some(("🚀", "Launch")));
+        assert_eq!(split_leading_emoji("🏷️ Tagged"), Some(("🏷️", "Tagged")));
+        assert_eq!(split_leading_emoji("📅 2026-10-31"), Some(("📅", "2026-10-31")));
+        assert_eq!(split_leading_emoji("🔔 Event"), Some(("🔔", "Event")));
+        assert_eq!(split_leading_emoji("No emoji"), None);
+        assert_eq!(split_leading_emoji(""), None);
+    }
 }

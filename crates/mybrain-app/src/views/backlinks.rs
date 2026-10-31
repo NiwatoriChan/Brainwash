@@ -73,9 +73,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
                 card.show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        let (dot_rect, _) = ui.allocate_exact_size(egui::vec2(6.0, 6.0), egui::Sense::hover());
-                        ui.painter().circle_filled(dot_rect.center(), 3.0, dot_col);
-                        ui.label(RichText::new(icon_str).size(12.0));
+                        ui.label(RichText::new(icon_str).color(dot_col).size(12.5));
                         if ui.button(RichText::new(source_id.name()).strong().color(t.text)).clicked() {
                             note_to_open = Some(source_id);
                         }
@@ -137,9 +135,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     .inner_margin(Margin::symmetric(8, 4))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            let (dot_rect, _) = ui.allocate_exact_size(egui::vec2(6.0, 6.0), egui::Sense::hover());
-                            ui.painter().circle_filled(dot_rect.center(), 3.0, dot_col);
-                            ui.label(RichText::new(icon_str).size(12.0));
+                            ui.label(RichText::new(icon_str).color(dot_col).size(12.5));
 
                             let text = RichText::new(out.link.display_text()).color(if is_resolved {
                                 t.text

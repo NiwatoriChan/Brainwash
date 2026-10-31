@@ -73,52 +73,61 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         ui.label(RichText::new("/").color(t.text_faint).size(12.0));
                     }
 
-                    // Clickable Note Color dot
+                    // Unified Note Emoji & Color button (merged)
                     let note_color = state.get_note_color(&active_id);
-                    ui.menu_button(
-                        RichText::new(if note_color.is_some() { "●" } else { "○" })
-                            .size(13.0)
-                            .color(note_color.unwrap_or(t.text_faint)),
-                        |ui| {
-                            ui.set_min_width(140.0);
-                            ui.label(RichText::new("Note Color:").size(11.0).color(t.text_faint));
-                            for (label, val) in [
-                                ("Default (None)", None),
-                                ("Red", Some("red")),
-                                ("Coral", Some("coral")),
-                                ("Amber", Some("yellow")),
-                                ("Green", Some("green")),
-                                ("Teal", Some("teal")),
-                                ("Blue", Some("blue")),
-                                ("Purple", Some("purple")),
-                                ("Magenta", Some("magenta")),
-                                ("Brown", Some("brown")),
-                            ] {
-                                if ui.button(label).clicked() {
-                                    state.set_note_color(&active_id, val);
-                                    ui.close();
-                                }
-                            }
-                        },
-                    )
-                    .response
-                    .on_hover_text("Set note color");
-
-                    // Clickable Note Emoji icon
                     let note_emoji = state.get_note_emoji(&active_id);
                     let is_daily = state.is_daily_note(&active_id);
                     let is_event = state.is_event_note(&active_id);
                     let default_icon = if is_daily { "📅" } else if is_event { "🔔" } else { "📝" };
                     let current_icon = note_emoji.as_deref().unwrap_or(default_icon);
 
+                    let icon_color = note_color.unwrap_or_else(|| {
+                        if is_event {
+                            t.warning
+                        } else if is_daily {
+                            t.accent
+                        } else {
+                            t.accent
+                        }
+                    });
+
                     ui.menu_button(
-                        RichText::new(current_icon).size(14.5),
+                        RichText::new(current_icon).size(15.0).color(icon_color),
                         |ui| {
-                            ui.set_min_width(200.0);
-                            ui.label(RichText::new("Quick Emojis:").size(11.0).color(t.text_faint));
+                            ui.set_min_width(220.0);
+
+                            // Section 1: Note Color
+                            ui.label(RichText::new("Note Color:").size(11.0).color(t.text_faint));
+                            ui.horizontal_wrapped(|ui| {
+                                for (label, val, dot_col) in [
+                                    ("Red", Some("red"), Color32::from_rgb(0xff, 0x5a, 0x5a)),
+                                    ("Coral", Some("coral"), Color32::from_rgb(0xff, 0x7a, 0x59)),
+                                    ("Amber", Some("yellow"), Color32::from_rgb(0xff, 0xc1, 0x07)),
+                                    ("Green", Some("green"), Color32::from_rgb(0x4c, 0xaf, 0x50)),
+                                    ("Teal", Some("teal"), Color32::from_rgb(0x20, 0xc9, 0x97)),
+                                    ("Blue", Some("blue"), Color32::from_rgb(0x3a, 0x86, 0xff)),
+                                    ("Purple", Some("purple"), Color32::from_rgb(0x9d, 0x4e, 0xdd)),
+                                    ("Magenta", Some("magenta"), Color32::from_rgb(0xf7, 0x25, 0x85)),
+                                    ("Brown", Some("brown"), Color32::from_rgb(0x8d, 0x6e, 0x63)),
+                                ] {
+                                    if ui.button(RichText::new("●").color(dot_col).size(14.0)).on_hover_text(label).clicked() {
+                                        state.set_note_color(&active_id, val);
+                                        ui.close();
+                                    }
+                                }
+                                if ui.button(RichText::new("⊘").color(t.text_faint).size(13.0)).on_hover_text("Default (None)").clicked() {
+                                    state.set_note_color(&active_id, None);
+                                    ui.close();
+                                }
+                            });
+
+                            ui.separator();
+
+                            // Section 2: Note Emoji
+                            ui.label(RichText::new("Note Emoji:").size(11.0).color(t.text_faint));
                             ui.horizontal_wrapped(|ui| {
                                 for em in ["📝", "📄", "💡", "🚀", "⭐", "📌", "🎯", "🔍", "🏷️", "💼", "📚", "🎨", "⚙️", "🌿", "⚡", "💬", "🧪", "📅"] {
-                                    if ui.button(em).clicked() {
+                                    if ui.button(RichText::new(em).color(icon_color)).clicked() {
                                         state.set_note_emoji(&active_id, Some(em));
                                         ui.close();
                                     }
@@ -130,14 +139,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                                 state.emoji_picker_search.clear();
                                 ui.close();
                             }
-                            if ui.button("Reset / Clear Emoji").clicked() {
+                            if (note_emoji.is_some() || note_color.is_some()) && ui.button("Reset Color & Emoji").clicked() {
                                 state.set_note_emoji(&active_id, None);
+                                state.set_note_color(&active_id, None);
                                 ui.close();
                             }
                         },
                     )
                     .response
-                    .on_hover_text("Change note icon");
+                    .on_hover_text("Change note icon & color");
 
                     // Title
                     ui.label(RichText::new(active_id.name()).color(t.text).strong().size(15.0));
@@ -1580,16 +1590,7 @@ fn render_tab_bar(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 5.0;
 
-                            // Color dot or active dot
-                            if let Some(col) = note_color {
-                                let (rect, _) = ui.allocate_exact_size(egui::vec2(7.0, 7.0), egui::Sense::hover());
-                                ui.painter().circle_filled(rect.center(), 3.5, col);
-                            } else if is_active {
-                                let (rect, _) = ui.allocate_exact_size(egui::vec2(7.0, 7.0), egui::Sense::hover());
-                                ui.painter().circle_filled(rect.center(), 3.5, t.accent);
-                            }
-
-                            // Custom emoji if assigned, or daily/event/note icon
+                            // Custom emoji if assigned, or daily/event/note icon (tinted with note color or active accent)
                             let is_tab_daily = state.is_daily_note(tab_id);
                             let is_tab_event = state.is_event_note(tab_id);
                             let tab_icon = if let Some(emoji) = &note_emoji {
@@ -1601,7 +1602,15 @@ fn render_tab_bar(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
                             } else {
                                 "📝"
                             };
-                            ui.label(RichText::new(tab_icon).size(12.0));
+
+                            let icon_color = note_color.unwrap_or_else(|| {
+                                if is_active {
+                                    t.accent
+                                } else {
+                                    t.text_dim
+                                }
+                            });
+                            ui.label(RichText::new(tab_icon).color(icon_color).size(12.5));
 
                             // Tab title
                             let text_color = if is_active { t.text } else { t.text_dim };

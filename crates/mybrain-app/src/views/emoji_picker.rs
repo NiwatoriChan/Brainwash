@@ -156,6 +156,12 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
         EmojiPickerTarget::NewNoteDialog => "For new note".to_string(),
     };
 
+    let target_color = match &target {
+        EmojiPickerTarget::Note(id) => state.get_note_color(id),
+        _ => None,
+    };
+    let glyph_color = target_color.unwrap_or(Color32::WHITE);
+
     let modal = egui::Modal::new(Id::unique("searchable_emoji_picker_modal"))
         .backdrop_color(Color32::from_black_alpha(150))
         .frame(theme::modal_frame(&t));
@@ -304,7 +310,7 @@ pub fn show(ctx: &egui::Context, state: &mut AppState) {
                                     egui::Align2::CENTER_CENTER,
                                     def.emoji,
                                     egui::FontId::proportional(18.0),
-                                    Color32::WHITE,
+                                    glyph_color,
                                 );
 
                                 if resp

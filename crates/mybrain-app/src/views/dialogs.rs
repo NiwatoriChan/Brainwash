@@ -86,7 +86,7 @@ pub fn show_new_note(ctx: &egui::Context, state: &mut AppState) {
         ui.label(RichText::new("Note Emoji / Icon:").color(t.text_dim).size(12.0));
         ui.horizontal_wrapped(|ui| {
             let current_emoji = state.new_note_emoji.as_deref().unwrap_or("📝");
-            ui.label(RichText::new(current_emoji).size(16.0));
+            ui.label(RichText::new(current_emoji).color(t.accent).size(16.0));
             ui.add_space(4.0);
             for em in ["📝", "📄", "💡", "🚀", "⭐", "📌", "🎯", "🔍", "🏷️", "💼", "📚", "🎨"] {
                 if ui.button(em).clicked() {
@@ -479,7 +479,7 @@ pub fn show_new_folder(ctx: &egui::Context, state: &mut AppState) {
         ui.label(RichText::new("Folder Emoji / Icon:").color(t.text_dim).size(12.0));
         ui.horizontal_wrapped(|ui| {
             let current_emoji = state.new_folder_emoji.as_deref().unwrap_or("📁");
-            ui.label(RichText::new(current_emoji).size(16.0));
+            ui.label(RichText::new(current_emoji).color(t.accent).size(16.0));
             ui.add_space(4.0);
             for em in ["📁", "📂", "🚀", "💡", "💼", "📚", "🎨", "🛠️", "🎯", "🏷️", "📦", "🌟"] {
                 if ui.button(em).clicked() {

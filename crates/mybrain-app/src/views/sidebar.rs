@@ -264,7 +264,8 @@ fn render_canvas_item(
     };
     let dot = Some(t.accent_text);
     let trail = folder_trail.unwrap_or("Canvas");
-    let resp = theme::list_row(ui, t, selected, dot, display_name, Some(trail));
+    let title_with_icon = format!("🎨 {display_name}");
+    let resp = theme::list_row(ui, t, selected, dot, &title_with_icon, Some(trail));
     if resp.drag_started() {
         egui::DragAndDrop::set_payload(
             ui.ctx(),
@@ -305,7 +306,7 @@ fn render_folder_node(
         .show_header(ui, |ui| {
             ui.horizontal(|ui| {
                 if let Some(emoji) = &folder_emoji {
-                    ui.label(RichText::new(emoji).size(12.5));
+                    ui.label(RichText::new(emoji).color(t.accent).size(12.5));
                 } else {
                     let (rect, _) = ui.allocate_exact_size(egui::vec2(13.0, 13.0), egui::Sense::hover());
                     theme::paint_folder_icon(ui.painter(), rect, t.text_dim);
@@ -980,9 +981,10 @@ fn render_quick_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| note.title().to_string());
 
+                    let title_with_icon = format!("⚡ {title}");
                     let trail = if is_pinned { Some("Pinned") } else { None };
                     let selected = state.quick_edit_note.as_ref() == Some(&note.id);
-                    let resp = theme::list_row(ui, t, selected, Some(dot_color), &title, trail);
+                    let resp = theme::list_row(ui, t, selected, Some(dot_color), &title_with_icon, trail);
                     if resp.drag_started() {
                         egui::DragAndDrop::set_payload(
                             ui.ctx(),
