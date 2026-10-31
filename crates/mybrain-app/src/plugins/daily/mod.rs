@@ -126,8 +126,8 @@ impl MyBrainPlugin for DailyPlugin {
 
     fn ribbon_button(&self) -> Option<RibbonButton> {
         Some(RibbonButton {
-            icon: "📅",
-            tooltip: "Daily Notes & Calendar (Ctrl+2)",
+            icon: "calendar",
+            tooltip: "Calendar View (Ctrl+2)",
             slot: RibbonSlot::Top,
             view_type: PluginViewType::MainWorkspace,
             priority: 40,

@@ -3,7 +3,7 @@
 use egui::{vec2, Align2, Color32, CornerRadius, CursorIcon, Frame, Margin, Rect, Sense, Stroke, Ui};
 
 use crate::plugins::{PluginRegistry, PluginViewType, RibbonSlot};
-use crate::theme::Tokens;
+use crate::theme::{self, Tokens};
 
 pub struct RibbonAction {
     pub toggle_side: Option<String>,
@@ -151,13 +151,19 @@ fn render_ribbon_icon_button(
         t.text_dim
     };
 
-    ui.painter().text(
-        rect.center(),
-        Align2::CENTER_CENTER,
-        icon,
-        egui::FontId::proportional(16.0),
-        color,
-    );
+    if icon == "calendar" || icon == "📅" || icon == "🗓" {
+        theme::paint_calendar_icon(ui.painter(), rect, color);
+    } else if icon == "graph" || icon == "🕸️" {
+        theme::paint_graph_icon(ui.painter(), rect, color);
+    } else {
+        ui.painter().text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            icon,
+            egui::FontId::proportional(16.0),
+            color,
+        );
+    }
 
     resp.on_hover_cursor(CursorIcon::PointingHand).on_hover_text(tooltip)
 }

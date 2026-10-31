@@ -82,11 +82,8 @@ impl AppShell {
             None
         };
 
-        let active_right = if settings.is_plugin_enabled("core.backlinks") {
-            Some("core.backlinks".to_string())
-        } else {
-            None
-        };
+        // Connections right panel is closed by default
+        let active_right = None;
 
         Ok(Self {
             vault,
@@ -637,16 +634,36 @@ impl AppShell {
 
                         ui.add_space(4.0);
 
-                        // Connections right panel toggle button
+                        // Connections right panel toggle button (simple icon)
                         let is_right_open = self.active_right_plugin.is_some();
-                        let conn_color = if is_right_open { t.accent_text } else { t.text_dim };
-                        if theme::ghost_button(
-                            ui,
-                            t,
-                            RichText::new(if is_right_open { "🔗 Connections ●" } else { "🔗 Connections" }).color(conn_color),
-                        )
-                        .on_hover_text("Toggle Connections & Backlinks right panel (Ctrl+Shift+B)")
-                        .clicked()
+                        let (btn_rect, btn_resp) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::click());
+                        if ui.is_rect_visible(btn_rect) {
+                            let painter = ui.painter();
+                            if is_right_open {
+                                painter.rect_filled(btn_rect, CornerRadius::same(t.radius_sm as u8), t.accent.gamma_multiply(0.2));
+                                painter.rect_stroke(btn_rect, CornerRadius::same(t.radius_sm as u8), Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
+                            } else if btn_resp.hovered() {
+                                painter.rect_filled(btn_rect, CornerRadius::same(t.radius_sm as u8), t.hover);
+                            }
+                            let icon_color = if is_right_open {
+                                t.accent_text
+                            } else if btn_resp.hovered() {
+                                t.text
+                            } else {
+                                t.text_dim
+                            };
+                            painter.text(
+                                btn_rect.center(),
+                                Align2::CENTER_CENTER,
+                                "🔗",
+                                egui::FontId::proportional(14.0),
+                                icon_color,
+                            );
+                        }
+                        if btn_resp
+                            .on_hover_text("Toggle Connections & Backlinks (Ctrl+Shift+B)")
+                            .on_hover_cursor(CursorIcon::PointingHand)
+                            .clicked()
                         {
                             if self.active_right_plugin.is_some() {
                                 self.active_right_plugin = None;
@@ -1210,16 +1227,17 @@ mod tests {
     #[test]
     fn test_right_panel_toggle_and_connection() {
         let (_tmp, mut shell) = temp_app_shell();
-        assert_eq!(shell.active_right_plugin.as_deref(), Some("core.backlinks"));
-
-        // Toggle right panel closed
-        shell.event_bus.emit(AppEvent::ToggleRightPanel("core.backlinks".into()));
-        shell.process_events();
+        // Closed by default
         assert_eq!(shell.active_right_plugin, None);
 
         // Toggle right panel open
         shell.event_bus.emit(AppEvent::ToggleRightPanel("core.backlinks".into()));
         shell.process_events();
         assert_eq!(shell.active_right_plugin.as_deref(), Some("core.backlinks"));
+
+        // Toggle right panel closed
+        shell.event_bus.emit(AppEvent::ToggleRightPanel("core.backlinks".into()));
+        shell.process_events();
+        assert_eq!(shell.active_right_plugin, None);
     }
 }
