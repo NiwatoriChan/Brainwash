@@ -76,6 +76,7 @@ pub struct AppState {
     pub open_tabs: Vec<NoteId>,
     pub editor_buffer: String,
     pub editor_cursor: usize,
+    pub editor_selection: Option<(usize, usize)>,
     pub editor_dirty: bool,
     pub view_mode: ViewMode,
 
@@ -145,6 +146,10 @@ pub struct AppState {
     pub show_new_note_dialog: bool,
     pub new_note_name: String,
     pub new_note_emoji: Option<String>,
+
+    pub show_rename_note_dialog: bool,
+    pub rename_note_target: Option<NoteId>,
+    pub rename_note_new_name: String,
 
     pub show_new_event_dialog: bool,
     pub new_event_draft: EventDraft,
@@ -234,6 +239,7 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
             open_tabs: Vec::new(),
             editor_buffer: String::new(),
             editor_cursor: 0,
+            editor_selection: None,
             editor_dirty: false,
             view_mode: ViewMode::Split,
             history: Vec::new(),
@@ -280,6 +286,9 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
             show_new_note_dialog: false,
             new_note_name: String::new(),
             new_note_emoji: None,
+            show_rename_note_dialog: false,
+            rename_note_target: None,
+            rename_note_new_name: String::new(),
             show_new_event_dialog: false,
             new_event_draft: EventDraft::new(today),
             emoji_picker_target: None,
@@ -664,6 +673,69 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
         }
     }
 
+    pub fn open_rename_note_dialog(&mut self, id: NoteId) {
+        self.rename_note_new_name = id.as_str().to_string();
+        self.rename_note_target = Some(id);
+        self.show_rename_note_dialog = true;
+    }
+
+    pub fn rename_note(&mut self, from: &NoteId, new_name: &str) {
+        let new_name = new_name.trim();
+        if new_name.is_empty() {
+            return;
+        }
+        let Ok(to) = NoteId::new(new_name) else {
+            self.set_status("Invalid note name");
+            return;
+        };
+        if from == &to {
+            self.show_rename_note_dialog = false;
+            return;
+        }
+        if let Some(folder) = to.folder() {
+            if self.is_reserved_special_folder(folder) {
+                self.set_status("Cannot move or rename notes into Daily or Quick Notes folders.");
+                return;
+            }
+        }
+        if self.active_note.as_ref() == Some(from) {
+            self.save_current();
+        }
+        match self.vault.rename(from, to.clone()) {
+            Ok(_) => {
+                for tab in &mut self.open_tabs {
+                    if tab == from {
+                        *tab = to.clone();
+                    }
+                }
+                for h in &mut self.history {
+                    if h == from {
+                        *h = to.clone();
+                    }
+                }
+                if self.active_note.as_ref() == Some(from) {
+                    self.active_note = Some(to.clone());
+                }
+                if let Some(active) = &self.active_note {
+                    if let Some(note) = self.vault.get(active) {
+                        self.editor_buffer = note.content.clone();
+                        self.editor_cursor = self.editor_buffer.len();
+                        self.editor_selection = None;
+                        self.editor_dirty = false;
+                    }
+                }
+                self.link_index = LinkIndex::build(&self.vault);
+                self.show_rename_note_dialog = false;
+                self.rename_note_target = None;
+                self.rename_note_new_name.clear();
+                self.set_status(format!("Renamed note to [[{}]]", to.as_str()));
+            }
+            Err(e) => {
+                self.set_status(format!("Cannot rename note: {e}"));
+            }
+        }
+    }
+
     pub fn delete_current_note(&mut self) {
         if let Some(id) = self.active_note.take() {
             self.open_tabs.retain(|t| t != &id);
@@ -881,6 +953,36 @@ Brainwash is a local-first, distraction-free **knowledge base** powered by Rust 
             }
             self.set_status("Quick note deleted");
         }
+    }
+
+    pub fn apply_inline_format(&mut self, prefix: &str, suffix: &str, placeholder: &str) {
+        if self.active_note.is_none() {
+            self.set_status("No active note open to format.");
+            return;
+        }
+        if let Some((start, end)) = self.editor_selection {
+            if start < end
+                && end <= self.editor_buffer.len()
+                && self.editor_buffer.is_char_boundary(start)
+                && self.editor_buffer.is_char_boundary(end)
+            {
+                let selected = &self.editor_buffer[start..end];
+                let replacement = format!("{prefix}{selected}{suffix}");
+                let mut new_buf =
+                    String::with_capacity(self.editor_buffer.len() + prefix.len() + suffix.len());
+                new_buf.push_str(&self.editor_buffer[..start]);
+                new_buf.push_str(&replacement);
+                new_buf.push_str(&self.editor_buffer[end..]);
+                self.editor_buffer = new_buf;
+                self.editor_dirty = true;
+                let new_cursor = start + replacement.len();
+                self.editor_cursor = new_cursor;
+                self.editor_selection = None;
+                return;
+            }
+        }
+        let snippet = format!("{prefix}{placeholder}{suffix}");
+        self.insert_snippet_into_active_note(&snippet);
     }
 
     pub fn insert_snippet_into_active_note(&mut self, snippet: &str) {
@@ -1489,6 +1591,44 @@ mod tests {
         state.close_current_tab();
         assert!(state.open_tabs.is_empty());
         assert_eq!(state.active_note, None);
+    }
+
+    #[test]
+    fn test_rename_note_updates_tabs_and_rewrites_links() {
+        let (_tmp, mut state) = temp_app_state();
+        let id_a = NoteId::new("Projects/OldName").unwrap();
+        let id_b = NoteId::new("Referrer").unwrap();
+        state.vault.create(id_a.clone(), "# OldName\nBody").unwrap();
+        state.vault.create(id_b.clone(), "See [[OldName]] for details.").unwrap();
+        state.open_note(id_a.clone());
+
+        state.rename_note(&id_a, "Projects/NewName");
+
+        let new_id = NoteId::new("Projects/NewName").unwrap();
+        assert_eq!(state.active_note.as_ref(), Some(&new_id));
+        assert!(state.open_tabs.contains(&new_id));
+        assert!(!state.open_tabs.contains(&id_a));
+
+        let referrer = state.vault.get(&id_b).unwrap();
+        assert!(referrer.content.contains("[[Projects/NewName]]"));
+    }
+
+    #[test]
+    fn test_apply_inline_format_selection_and_placeholder() {
+        let (_tmp, mut state) = temp_app_state();
+        let id = NoteId::new("FormatDoc").unwrap();
+        state.vault.create(id.clone(), "Hello world").unwrap();
+        state.open_note(id);
+
+        // Wrap selected "world" (bytes 6..11) in bold
+        state.editor_selection = Some((6, 11));
+        state.apply_inline_format("**", "**", "bold");
+        assert_eq!(state.editor_buffer, "Hello **world**");
+
+        // Without selection, inserts placeholder at cursor
+        state.editor_cursor = state.editor_buffer.len();
+        state.apply_inline_format(" [[", "]]", "Note");
+        assert_eq!(state.editor_buffer, "Hello **world** [[Note]]");
     }
 }
 

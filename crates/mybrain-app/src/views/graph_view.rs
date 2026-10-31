@@ -1,6 +1,8 @@
 //! Obsidian-style interactive 2D knowledge graph view.
 
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 
 use egui::{
     pos2, vec2, Align2, CornerRadius, CursorIcon, FontId, Frame, Margin, Pos2, Rect, RichText,
@@ -37,7 +39,8 @@ pub struct GraphState {
     pub dragged_node: Option<NoteId>,
     pub hovered_node: Option<NoteId>,
     pub initialized: bool,
-    pub last_vault_len: usize,
+    pub last_signature: u64,
+    pub local_graph_only: bool,
 }
 
 impl Default for GraphState {
@@ -50,23 +53,64 @@ impl Default for GraphState {
             dragged_node: None,
             hovered_node: None,
             initialized: false,
-            last_vault_len: 0,
+            last_signature: 0,
+            local_graph_only: false,
         }
     }
 }
 
 impl GraphState {
     /// Synchronize graph nodes and edges with the current vault and link index.
-    pub fn sync(&mut self, vault: &mybrain_core::vault::Vault, link_index: &mybrain_core::LinkIndex) {
-        let vault_len = vault.len();
-        if self.initialized && vault_len == self.last_vault_len {
+    pub fn sync(
+        &mut self,
+        vault: &mybrain_core::vault::Vault,
+        link_index: &mybrain_core::LinkIndex,
+        active_note: Option<&NoteId>,
+    ) {
+        let mut hasher = DefaultHasher::new();
+        self.local_graph_only.hash(&mut hasher);
+        if self.local_graph_only {
+            active_note.hash(&mut hasher);
+        }
+        for note in vault.notes() {
+            note.id.hash(&mut hasher);
+            for out in link_index.outgoing(&note.id) {
+                out.resolved.hash(&mut hasher);
+            }
+        }
+        let signature = hasher.finish();
+        if self.initialized && signature == self.last_signature {
             return;
         }
 
-        self.last_vault_len = vault_len;
+        self.last_signature = signature;
         let mut new_nodes = HashMap::new();
         let mut new_edges = Vec::new();
-        let note_ids: Vec<NoteId> = vault.notes().map(|n| n.id.clone()).collect();
+        let all_note_ids: Vec<NoteId> = vault.notes().map(|n| n.id.clone()).collect();
+
+        // Filter to 1-hop neighborhood if local_graph_only is enabled and active_note exists
+        let allowed_ids: Option<HashSet<NoteId>> = if self.local_graph_only {
+            active_note.map(|center_id| {
+                let mut set = HashSet::new();
+                set.insert(center_id.clone());
+                for out in link_index.outgoing(center_id) {
+                    if let Some(target) = &out.resolved {
+                        set.insert(target.clone());
+                    }
+                }
+                for bl in link_index.backlinks(center_id) {
+                    set.insert(bl.source.clone());
+                }
+                set
+            })
+        } else {
+            None
+        };
+
+        let note_ids: Vec<NoteId> = all_note_ids
+            .into_iter()
+            .filter(|id| allowed_ids.as_ref().map_or(true, |s| s.contains(id)))
+            .collect();
         let n = note_ids.len();
 
         // Calculate degrees
@@ -74,12 +118,14 @@ impl GraphState {
         for id in &note_ids {
             for out in link_index.outgoing(id) {
                 if let Some(target) = &out.resolved {
-                    *degrees.entry(id.clone()).or_insert(0) += 1;
-                    *degrees.entry(target.clone()).or_insert(0) += 1;
-                    new_edges.push(GraphEdge {
-                        from: id.clone(),
-                        to: target.clone(),
-                    });
+                    if allowed_ids.as_ref().map_or(true, |s| s.contains(target)) {
+                        *degrees.entry(id.clone()).or_insert(0) += 1;
+                        *degrees.entry(target.clone()).or_insert(0) += 1;
+                        new_edges.push(GraphEdge {
+                            from: id.clone(),
+                            to: target.clone(),
+                        });
+                    }
                 }
             }
         }
@@ -118,11 +164,12 @@ impl GraphState {
     }
 
     /// Run one step of the spring-electrical force-directed simulation.
-    pub fn step_physics(&mut self, is_dragging: bool) {
+    /// Returns `true` if any node is still moving above the sleep threshold.
+    pub fn step_physics(&mut self, is_dragging: bool) -> bool {
         let node_ids: Vec<NoteId> = self.nodes.keys().cloned().collect();
         let n = node_ids.len();
         if n == 0 {
-            return;
+            return false;
         }
 
         let k_repulsion = 7500.0;
@@ -173,6 +220,7 @@ impl GraphState {
         }
 
         // 3. Central gravitational pull & integrate
+        let mut any_moving = is_dragging;
         for (id, node) in self.nodes.iter_mut() {
             if Some(id) == self.dragged_node.as_ref() && is_dragging {
                 node.vel = Vec2::ZERO;
@@ -186,15 +234,23 @@ impl GraphState {
             if node.vel.length() > max_speed {
                 node.vel = node.vel.normalized() * max_speed;
             }
-            node.pos += node.vel;
+            if node.vel.length_sq() > 0.0016 {
+                node.pos += node.vel;
+                any_moving = true;
+            } else {
+                node.vel = Vec2::ZERO;
+            }
         }
+        any_moving
     }
 }
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
 
-    state.graph.sync(&state.vault, &state.link_index);
+    state
+        .graph
+        .sync(&state.vault, &state.link_index, state.active_note.as_ref());
 
     let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
     let rect = response.rect;
@@ -243,9 +299,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         state.graph.dragged_node = None;
     }
 
-    // Physics step
-    state.graph.step_physics(is_dragging);
-    ui.ctx().request_repaint();
+    // Physics step (only request repaint while nodes are still settling or being dragged)
+    if state.graph.step_physics(is_dragging) {
+        ui.ctx().request_repaint();
+    }
 
     // Hover detection
     let mut hovered_node = None;
@@ -424,10 +481,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             });
     });
 
-    // Top-right controls overlay: Zoom & Reset
+    // Top-right controls overlay: Local Graph toggle, Zoom & Reset
     let controls_rect = Rect::from_min_size(
-        pos2(rect.right() - 210.0, rect.top() + 16.0),
-        vec2(194.0, 42.0),
+        pos2(rect.right() - 290.0, rect.top() + 16.0),
+        vec2(274.0, 42.0),
     );
 
     ui.scope_builder(UiBuilder::new().max_rect(controls_rect), |ui| {
@@ -445,6 +502,22 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         if crate::theme::ghost_button(ui, &t, RichText::new("Reset View").color(t.accent_text).size(11.5)).clicked() {
                             state.graph.pan = Vec2::ZERO;
                             state.graph.zoom = 1.0;
+                        }
+                        let local_label = if state.graph.local_graph_only {
+                            "Local (1-hop) ●"
+                        } else {
+                            "Local (1-hop)"
+                        };
+                        let local_col = if state.graph.local_graph_only {
+                            t.accent_text
+                        } else {
+                            t.text_dim
+                        };
+                        if crate::theme::ghost_button(ui, &t, RichText::new(local_label).color(local_col).size(11.5))
+                            .on_hover_text("Toggle between full vault graph and active note's 1-hop neighborhood")
+                            .clicked()
+                        {
+                            state.graph.local_graph_only = !state.graph.local_graph_only;
                         }
                     });
                 });

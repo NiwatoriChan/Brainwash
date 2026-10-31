@@ -33,9 +33,17 @@ impl BrainwashApp {
             if i.modifiers.command && i.key_pressed(egui::Key::S) {
                 self.state.save_current();
             }
-            // Ctrl+P / Ctrl+O: Command Palette
-            if i.modifiers.command && (i.key_pressed(egui::Key::P) || i.key_pressed(egui::Key::O)) {
+            // Ctrl+P: Command Palette
+            if i.modifiers.command && i.key_pressed(egui::Key::P) {
                 self.state.show_command_palette = !self.state.show_command_palette;
+            }
+            // F2: Rename active note
+            if i.key_pressed(egui::Key::F2) {
+                if let Some(active) = self.state.active_note.clone() {
+                    if !self.state.is_daily_note(&active) && !self.state.is_event_note(&active) {
+                        self.state.open_rename_note_dialog(active);
+                    }
+                }
             }
             // Ctrl+Q: Quick Capture / Keep view
             if i.modifiers.command && i.key_pressed(egui::Key::Q) {
@@ -462,6 +470,7 @@ impl eframe::App for BrainwashApp {
         views::quick_capture::show(&ctx, &mut self.state);
         views::quick_capture::show_keep_edit_dialog(&ctx, &mut self.state);
         views::dialogs::show_new_note(&ctx, &mut self.state);
+        views::dialogs::show_rename_note(&ctx, &mut self.state);
         views::dialogs::show_new_event(&ctx, &mut self.state);
         views::dialogs::show_new_folder(&ctx, &mut self.state);
         views::dialogs::show_new_canvas(&ctx, &mut self.state);
@@ -512,6 +521,8 @@ impl eframe::App for BrainwashApp {
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        self.state.save_current();
+        self.state.save_canvas();
         eframe::set_value(storage, KEY_THEME, &self.state.theme_kind);
         eframe::set_value(storage, KEY_VIEW_MODE, &self.state.view_mode);
         eframe::set_value(storage, KEY_SHOW_BACKLINKS, &self.state.show_backlinks);
@@ -649,6 +660,7 @@ fn main() -> eframe::Result {
             }
             theme::install_fonts(&cc.egui_ctx);
             theme::apply_theme(&cc.egui_ctx, state.theme_kind);
+            cc.egui_ctx.set_zoom_factor(state.settings.ui_scale.clamp(0.8, 1.5));
             Ok(Box::new(BrainwashApp::new(state)))
         }),
     )

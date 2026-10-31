@@ -25,78 +25,91 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     ScrollArea::vertical()
         .id_salt("daily_view_scroll")
+        .auto_shrink([false, false])
         .show(ui, |ui| {
-            ui.add_space(16.0);
-            ui.vertical_centered(|ui| {
-                ui.set_max_width(theme::READABLE_WIDTH + 100.0);
+            Frame::NONE
+                .inner_margin(Margin::symmetric(28, 16))
+                .show(ui, |ui| {
+                    let avail_w = ui.available_width();
+                    let max_w = avail_w.min(theme::READABLE_WIDTH + 100.0);
+                    let side_pad = ((avail_w - max_w) * 0.5).max(0.0);
 
-                // Top Action Bar
-                ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        ui.heading(RichText::new("Calendar").strong().size(18.0).color(t.text));
-                        ui.label(RichText::new("Click any date to open or create its daily note").color(t.text_dim).size(12.0));
+                    ui.horizontal(|ui| {
+                        if side_pad > 0.0 {
+                            ui.add_space(side_pad);
+                        }
+                        ui.vertical(|ui| {
+                            ui.set_max_width(max_w);
+
+                            // Top Action Bar
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.heading(RichText::new("Calendar").strong().size(18.0).color(t.text));
+                                    ui.label(RichText::new("Click any date to open or create its daily note").color(t.text_dim).size(12.0));
+                                });
+
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui
+                                        .add(
+                                            egui::Button::new(
+                                                RichText::new("Open Today's Note →")
+                                                    .strong()
+                                                    .color(Color32::WHITE),
+                                            )
+                                            .fill(t.accent)
+                                            .stroke(Stroke::NONE)
+                                            .corner_radius(CornerRadius::same(t.radius_sm as u8)),
+                                        )
+                                        .on_hover_text("Open or create today's daily note")
+                                        .clicked()
+                                    {
+                                        date_to_open = Some(Local::now().date_naive());
+                                    }
+
+                                    if theme::ghost_button(
+                                        ui,
+                                        &t,
+                                        RichText::new("Jump to Today").color(t.accent_text).strong(),
+                                    )
+                                    .on_hover_text("View current month in calendar")
+                                    .clicked()
+                                    {
+                                        let today = Local::now().date_naive();
+                                        state.selected_daily_date = today;
+                                        state.calendar_view_date = today;
+                                    }
+
+                                    if theme::ghost_button(
+                                        ui,
+                                        &t,
+                                        RichText::new("+ Event").color(t.success).strong(),
+                                    )
+                                    .on_hover_text("Schedule an event for the selected day")
+                                    .clicked()
+                                    {
+                                        state.new_event_draft =
+                                            EventDraft::new(state.selected_daily_date);
+                                        state.show_new_event_dialog = true;
+                                    }
+                                });
+                            });
+
+                            ui.add_space(14.0);
+
+                            render_month_calendar(
+                                ui,
+                                state,
+                                &t,
+                                &mut selected_date_to_set,
+                                &mut date_to_open,
+                                &mut event_to_open,
+                                &mut open_event_dialog,
+                                &mut sync_events_date,
+                            );
+                        });
                     });
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    RichText::new("Open Today's Note →")
-                                        .strong()
-                                        .color(Color32::WHITE),
-                                )
-                                .fill(t.accent)
-                                .stroke(Stroke::NONE)
-                                .corner_radius(CornerRadius::same(t.radius_sm as u8)),
-                            )
-                            .on_hover_text("Open or create today's daily note")
-                            .clicked()
-                        {
-                            date_to_open = Some(Local::now().date_naive());
-                        }
-
-                        if theme::ghost_button(
-                            ui,
-                            &t,
-                            RichText::new("Jump to Today").color(t.accent_text).strong(),
-                        )
-                        .on_hover_text("View current month in calendar")
-                        .clicked()
-                        {
-                            let today = Local::now().date_naive();
-                            state.selected_daily_date = today;
-                            state.calendar_view_date = today;
-                        }
-
-                        if theme::ghost_button(
-                            ui,
-                            &t,
-                            RichText::new("+ Event").color(t.success).strong(),
-                        )
-                        .on_hover_text("Schedule an event for the selected day")
-                        .clicked()
-                        {
-                            state.new_event_draft =
-                                EventDraft::new(state.selected_daily_date);
-                            state.show_new_event_dialog = true;
-                        }
-                    });
+                    ui.add_space(24.0);
                 });
-
-                ui.add_space(14.0);
-
-                render_month_calendar(
-                    ui,
-                    state,
-                    &t,
-                    &mut selected_date_to_set,
-                    &mut date_to_open,
-                    &mut event_to_open,
-                    &mut open_event_dialog,
-                    &mut sync_events_date,
-                );
-            });
-            ui.add_space(40.0);
         });
 
     if let Some(d) = selected_date_to_set {

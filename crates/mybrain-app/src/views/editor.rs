@@ -16,6 +16,9 @@ use crate::theme::{self, Tokens};
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
+    let panel_max_rect = ui.max_rect();
+    ui.set_max_width(panel_max_rect.width());
+    ui.set_clip_rect(panel_max_rect.intersect(ui.clip_rect()));
 
     // 0. Tab bar for open notes
     render_tab_bar(ui, state, &t);
@@ -63,44 +66,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
                 // Note breadcrumb & title with emoji icon and color dot
                 ui.horizontal(|ui| {
+                    // Folder trail breadcrumb if note is in a folder
                     if let Some(folder) = active_id.folder() {
-                        theme::pill(ui, folder, t.text_faint, t.field);
+                        let folder_emoji = state.get_folder_emoji(folder).unwrap_or_else(|| "📁".to_string());
+                        theme::pill(ui, &format!("{folder_emoji} {folder}"), t.text_dim, t.field);
                         ui.label(RichText::new("/").color(t.text_faint).size(12.0));
-                    }
-
-                    // Clickable Note Emoji picker
-                    let note_emoji = state.get_note_emoji(&active_id);
-                    if let Some(emoji) = &note_emoji {
-                        ui.menu_button(RichText::new(emoji).size(15.0), |ui| {
-                            ui.set_min_width(180.0);
-                            ui.label(RichText::new("Note Icon:").size(11.0).color(t.text_faint));
-                            ui.horizontal_wrapped(|ui| {
-                                for emoji in ["📝", "📄", "💡", "🚀", "⭐", "📌", "🎯", "🔍", "🏷️", "💼", "📚", "🎨", "⚙️", "🌿", "⚡", "💬", "🧪", "📅"] {
-                                    if ui.button(emoji).clicked() {
-                                        state.set_note_emoji(&active_id, Some(emoji));
-                                        ui.close();
-                                    }
-                                }
-                            });
-                            ui.separator();
-                            if ui.button("Clear Icon").clicked() {
-                                state.set_note_emoji(&active_id, None);
-                                ui.close();
-                            }
-                        });
-                    } else {
-                        ui.menu_button(RichText::new("Icon ▾").size(12.0).color(t.text_faint), |ui| {
-                            ui.set_min_width(180.0);
-                            ui.label(RichText::new("Choose Note Icon:").size(11.0).color(t.text_faint));
-                            ui.horizontal_wrapped(|ui| {
-                                for emoji in ["📝", "📄", "💡", "🚀", "⭐", "📌", "🎯", "🔍", "🏷️", "💼", "📚", "🎨", "⚙️", "🌿", "⚡", "💬", "🧪", "📅"] {
-                                    if ui.button(emoji).clicked() {
-                                        state.set_note_emoji(&active_id, Some(emoji));
-                                        ui.close();
-                                    }
-                                }
-                            });
-                        });
                     }
 
                     // Clickable Note Color dot
@@ -130,7 +100,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                                 }
                             }
                         },
-                    );
+                    )
+                    .response
+                    .on_hover_text("Set note color");
 
                     // Clickable Note Emoji icon
                     let note_emoji = state.get_note_emoji(&active_id);
@@ -140,7 +112,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     let current_icon = note_emoji.as_deref().unwrap_or(default_icon);
 
                     ui.menu_button(
-                        RichText::new(current_icon).size(14.0),
+                        RichText::new(current_icon).size(14.5),
                         |ui| {
                             ui.set_min_width(200.0);
                             ui.label(RichText::new("Quick Emojis:").size(11.0).color(t.text_faint));
@@ -163,13 +135,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                                 ui.close();
                             }
                         },
-                    );
-
-                    // Folder trail breadcrumb if note is in a folder
-                    if let Some(folder) = active_id.folder() {
-                        let folder_emoji = state.get_folder_emoji(folder).unwrap_or_else(|| "📁".to_string());
-                        ui.label(RichText::new(format!("{folder_emoji} {folder} /")).color(t.text_faint).size(13.0));
-                    }
+                    )
+                    .response
+                    .on_hover_text("Change note icon");
 
                     // Title
                     ui.label(RichText::new(active_id.name()).color(t.text).strong().size(15.0));
@@ -217,7 +185,14 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     // More actions menu (···)
                     ui.menu_button("···", |ui| {
-                        ui.set_min_width(140.0);
+                        ui.set_min_width(160.0);
+                        if !state.is_daily_note(&active_id) && !state.is_event_note(&active_id) {
+                            if ui.button("✏️ Rename / Move Note… (F2)").clicked() {
+                                state.open_rename_note_dialog(active_id.clone());
+                                ui.close();
+                            }
+                            ui.separator();
+                        }
                         if ui.button("🗑 Delete Note").clicked() {
                             state.delete_current_note();
                             ui.close();
@@ -265,13 +240,17 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     theme::bottom_hairline(ui, ui.max_rect(), &t);
 
     // Main workspace area
-    let available_size = ui.available_size();
+    let workspace_rect = egui::Rect::from_min_max(ui.cursor().min, panel_max_rect.max);
+    ui.set_max_width(workspace_rect.width());
+    let available_size = workspace_rect.size().max(egui::Vec2::ZERO);
     match state.view_mode {
         ViewMode::EditOnly => {
             ui.allocate_ui_with_layout(
                 available_size,
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
+                    ui.set_max_size(available_size);
+                    ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
                     render_editor_pane(ui, state, &t);
                 },
             );
@@ -281,29 +260,46 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 available_size,
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
+                    ui.set_max_size(available_size);
+                    ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
                     render_preview_pane(ui, state, &t);
                 },
             );
         }
         ViewMode::Split => {
-            let pane_width = ((available_size.x - 1.0) / 2.0).max(100.0);
+            let sep_space = 1.0;
+            let pane_width = ((available_size.x - sep_space) / 2.0).max(50.0);
             let pane_height = available_size.y;
 
             ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                ui.set_max_size(available_size);
+
                 ui.allocate_ui_with_layout(
                     egui::vec2(pane_width, pane_height),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
+                        ui.set_max_size(egui::vec2(pane_width, pane_height));
+                        ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
                         render_editor_pane(ui, state, &t);
                     },
                 );
 
-                ui.separator();
+                let (sep_rect, _) =
+                    ui.allocate_exact_size(egui::vec2(sep_space, pane_height), egui::Sense::hover());
+                ui.painter().vline(
+                    sep_rect.center().x,
+                    sep_rect.y_range(),
+                    Stroke::new(1.0, t.separator),
+                );
 
+                let right_width = (available_size.x - pane_width - sep_space).max(50.0);
                 ui.allocate_ui_with_layout(
-                    egui::vec2(ui.available_width(), pane_height),
+                    egui::vec2(right_width, pane_height),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
+                        ui.set_max_size(egui::vec2(right_width, pane_height));
+                        ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
                         render_preview_pane(ui, state, &t);
                     },
                 );
@@ -327,6 +323,9 @@ fn render_editor_pane(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
     };
 
     let frame_resp = frame.show(ui, |ui| {
+        let avail_width = ui.available_width();
+        ui.set_max_width(avail_width);
+
         if is_dragged {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Drop note anywhere to insert [[link]]").strong().color(t.accent_text).size(12.0));
@@ -336,8 +335,10 @@ fn render_editor_pane(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
 
         ScrollArea::vertical()
             .id_salt("editor_scroll")
+            .max_width(avail_width)
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                ui.set_max_width(ui.available_width());
                 // Integrated Scheduled Events card if this is a daily note
                 let maybe_daily_date = state.active_note.as_ref().and_then(|id| state.daily_config.date_of(id));
                 if let Some(daily_date) = maybe_daily_date {
@@ -345,8 +346,9 @@ fn render_editor_pane(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
                     ui.add_space(12.0);
                 }
 
+                let editor_font_size = state.settings.editor_font_size.clamp(10.0, 24.0);
                 let mut layouter = |ui: &Ui, buf: &dyn TextBuffer, wrap_width: f32| {
-                    let mut layout_job = highlight_markdown(buf.as_str(), t);
+                    let mut layout_job = highlight_markdown(buf.as_str(), t, editor_font_size);
                     layout_job.wrap.max_width = wrap_width;
                     ui.ctx().fonts_mut(|f| f.layout_job(layout_job))
                 };
@@ -359,14 +361,27 @@ fn render_editor_pane(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
                     .show(ui);
 
                 if let Some(cursor_range) = output.cursor_range {
-                    let cursor_char_idx = cursor_range.primary.index.0;
-                    let byte_offset = state
-                        .editor_buffer
-                        .char_indices()
-                        .nth(cursor_char_idx)
-                        .map(|(b, _)| b)
-                        .unwrap_or(state.editor_buffer.len());
-                    state.editor_cursor = byte_offset;
+                    let char_to_byte = |char_idx: usize| -> usize {
+                        state
+                            .editor_buffer
+                            .char_indices()
+                            .nth(char_idx)
+                            .map(|(b, _)| b)
+                            .unwrap_or(state.editor_buffer.len())
+                    };
+                    let primary_byte = char_to_byte(cursor_range.primary.index.0);
+                    let secondary_byte = char_to_byte(cursor_range.secondary.index.0);
+                    state.editor_cursor = primary_byte;
+                    let (start, end) = if primary_byte <= secondary_byte {
+                        (primary_byte, secondary_byte)
+                    } else {
+                        (secondary_byte, primary_byte)
+                    };
+                    state.editor_selection = if start < end {
+                        Some((start, end))
+                    } else {
+                        None
+                    };
                 }
 
                 if output.response.changed() {
@@ -496,6 +511,9 @@ fn render_preview_pane(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
     };
 
     let frame_resp = frame.show(ui, |ui| {
+        let avail_width = ui.available_width();
+        ui.set_max_width(avail_width);
+
         if is_dragged {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Drop note anywhere to insert [[link]]").strong().color(t.accent_text).size(12.0));
@@ -505,10 +523,12 @@ fn render_preview_pane(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
 
         ScrollArea::vertical()
             .id_salt("preview_scroll")
+            .max_width(avail_width)
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                    ui.vertical(|ui| {
-                        ui.set_max_width(theme::READABLE_WIDTH);
+                let content_width = ui.available_width();
+                ui.vertical(|ui| {
+                    ui.set_max_width(content_width);
 
                         // 1. Obsidian-style Frontmatter Properties
                         let (frontmatter, _) = Frontmatter::parse(&state.editor_buffer);
@@ -565,7 +585,8 @@ fn render_preview_pane(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
                                     ui.add_space(6.0);
                                 }
                                 Block::ListItem { indent, marker, text } => {
-                                    ui.horizontal(|ui| {
+                                    ui.horizontal_top(|ui| {
+                                        ui.set_max_width(ui.available_width());
                                         if indent > 0 {
                                             ui.add_space(indent as f32 * 18.0);
                                         }
@@ -591,8 +612,20 @@ fn render_preview_pane(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
                                     ui.add_space(2.0);
                                 }
                                 Block::Quote(text) => {
-                                    render_quote_or_callout(ui, text, &mut note_to_open, &state.vault, t);
+                                    render_quote_or_callout(ui, &text, &mut note_to_open, &state.vault, t);
                                     ui.add_space(8.0);
+                                }
+                                Block::Table { headers, rows } => {
+                                    render_markdown_table(
+                                        ui,
+                                        &headers,
+                                        &rows,
+                                        line_no,
+                                        &mut note_to_open,
+                                        &state.vault,
+                                        t,
+                                    );
+                                    ui.add_space(10.0);
                                 }
                                 Block::Code { lang, code } => {
                                     if lang.eq_ignore_ascii_case("event") {
@@ -621,15 +654,19 @@ fn render_preview_pane(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
                                             .corner_radius(CornerRadius::same(t.radius_sm as u8))
                                             .inner_margin(Margin::same(12))
                                             .show(ui, |ui| {
+                                                ui.set_max_width(ui.available_width());
                                                 if !lang.is_empty() {
                                                     ui.horizontal(|ui| {
                                                         theme::pill(ui, &lang.to_uppercase(), t.text_faint, t.field);
                                                     });
                                                     ui.add_space(4.0);
                                                 }
-                                                ScrollArea::horizontal().id_salt(format!("code_block_{line_no}")).show(ui, |ui| {
-                                                    ui.label(RichText::new(code.trim_end()).monospace().color(t.text).size(12.5));
-                                                });
+                                                ScrollArea::horizontal()
+                                                    .id_salt(format!("code_block_{line_no}"))
+                                                    .max_width(ui.available_width())
+                                                    .show(ui, |ui| {
+                                                        ui.label(RichText::new(code.trim_end()).monospace().color(t.text).size(12.5));
+                                                    });
                                             });
                                         ui.add_space(8.0);
                                     }
@@ -786,6 +823,39 @@ fn render_properties_card(ui: &mut Ui, frontmatter: &Frontmatter, t: &Tokens) {
     });
 }
 
+/// Renders a Markdown pipe table as a styled grid card.
+fn render_markdown_table(
+    ui: &mut Ui,
+    headers: &[&str],
+    rows: &[Vec<&str>],
+    line_no: usize,
+    note_to_open: &mut Option<String>,
+    vault: &Vault,
+    t: &Tokens,
+) {
+    let card = theme::card_frame(t, false).inner_margin(Margin::symmetric(12, 8));
+    card.show(ui, |ui| {
+        ui.set_max_width(ui.available_width());
+        egui::Grid::new(format!("md_table_{line_no}"))
+            .striped(true)
+            .spacing([18.0, 6.0])
+            .show(ui, |ui| {
+                for h in headers {
+                    ui.label(RichText::new(*h).strong().color(t.accent_text).size(12.5));
+                }
+                ui.end_row();
+
+                for row in rows {
+                    for col_idx in 0..headers.len() {
+                        let cell = row.get(col_idx).copied().unwrap_or("");
+                        render_inline_spans(ui, cell, note_to_open, false, vault, t);
+                    }
+                    ui.end_row();
+                }
+            });
+    });
+}
+
 /// Renders either an Obsidian callout (`> [!NOTE]`) or a standard blockquote
 fn render_quote_or_callout(
     ui: &mut Ui,
@@ -806,7 +876,9 @@ fn render_quote_or_callout(
                 _ => (t.accent_text, kind.as_str()),
             };
 
-            let body = after.trim();
+            let mut lines_iter = after.lines();
+            let first_line_title = lines_iter.next().unwrap_or("").trim();
+            let remaining_body: Vec<&str> = lines_iter.collect();
 
             Frame::NONE
                 .fill(t.accent_soft)
@@ -814,24 +886,42 @@ fn render_quote_or_callout(
                 .corner_radius(CornerRadius::same(t.radius_sm as u8))
                 .inner_margin(Margin::same(10))
                 .show(ui, |ui| {
+                    ui.set_max_width(ui.available_width());
                     ui.horizontal(|ui| {
                         theme::pill(ui, label, accent_color, t.card);
+                        if !first_line_title.is_empty() && !remaining_body.is_empty() {
+                            ui.label(RichText::new(first_line_title).strong().color(t.text).size(12.5));
+                        }
                     });
                     ui.add_space(4.0);
-                    render_inline_spans(ui, body, note_to_open, false, vault, t);
+                    if remaining_body.is_empty() {
+                        if !first_line_title.is_empty() {
+                            render_inline_spans(ui, first_line_title, note_to_open, false, vault, t);
+                        }
+                    } else {
+                        for line in remaining_body {
+                            if !line.trim().is_empty() {
+                                render_inline_spans(ui, line, note_to_open, false, vault, t);
+                            }
+                        }
+                    }
                 });
             return;
         }
     }
 
-    // Standard Obsidian blockquote with accent left bar
+    // Standard Obsidian blockquote with accent left bar (supports multi-line quotes)
     Frame::NONE
         .inner_margin(Margin::symmetric(8, 4))
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("▎").strong().color(t.accent).size(13.0));
-                render_inline_spans(ui, text, note_to_open, false, vault, t);
-            });
+            ui.set_max_width(ui.available_width());
+            for line in text.lines() {
+                ui.horizontal_top(|ui| {
+                    ui.set_max_width(ui.available_width());
+                    ui.label(RichText::new("▎").strong().color(t.accent).size(13.0));
+                    render_inline_spans(ui, line, note_to_open, false, vault, t);
+                });
+            }
         });
 }
 
@@ -843,7 +933,9 @@ fn render_inline_spans(
     vault: &Vault,
     t: &Tokens,
 ) {
+    let avail_width = ui.available_width();
     ui.horizontal_wrapped(|ui| {
+        ui.set_max_width(avail_width);
         ui.spacing_mut().item_spacing.x = 3.0;
         let spans = parse_inline(text);
         for span in spans {
@@ -874,6 +966,9 @@ fn render_inline_spans(
                         rt = rt.color(t.text_dim);
                     }
                     ui.label(rt);
+                }
+                Inline::Strikethrough(txt) => {
+                    ui.label(RichText::new(txt).color(t.text_dim).strikethrough());
                 }
                 Inline::Code(code) => {
                     Frame::NONE
@@ -939,10 +1034,10 @@ fn render_inline_spans(
     });
 }
 
-fn highlight_markdown(text: &str, t: &Tokens) -> LayoutJob {
+fn highlight_markdown(text: &str, t: &Tokens, font_size: f32) -> LayoutJob {
     let mut job = LayoutJob::default();
-    let default_font = FontId::monospace(13.0);
-    let heading_font = FontId::monospace(14.5);
+    let default_font = FontId::monospace(font_size);
+    let heading_font = FontId::monospace(font_size + 1.5);
 
     for line in text.split_inclusive('\n') {
         let trimmed = line.trim_start();
@@ -1261,28 +1356,28 @@ fn render_note_formatting_toolbar(ui: &mut Ui, state: &mut AppState, t: &Tokens)
                     .on_hover_text("Bold (**text**)")
                     .clicked()
                 {
-                    state.insert_snippet_into_active_note("****");
+                    state.apply_inline_format("**", "**", "bold");
                 }
 
                 if theme::ghost_button(ui, t, RichText::new("I").italics().color(t.text).size(12.0))
                     .on_hover_text("Italic (*text*)")
                     .clicked()
                 {
-                    state.insert_snippet_into_active_note("**");
+                    state.apply_inline_format("*", "*", "italic");
                 }
 
                 if theme::ghost_button(ui, t, RichText::new("S").strikethrough().color(t.text_dim).size(12.0))
                     .on_hover_text("Strikethrough (~~text~~)")
                     .clicked()
                 {
-                    state.insert_snippet_into_active_note("~~~~");
+                    state.apply_inline_format("~~", "~~", "text");
                 }
 
                 if theme::ghost_button(ui, t, RichText::new("`c`").monospace().color(t.accent_text).size(11.5))
                     .on_hover_text("Inline Code (`code`)")
                     .clicked()
                 {
-                    state.insert_snippet_into_active_note("``");
+                    state.apply_inline_format("`", "`", "code");
                 }
 
                 ui.add_space(2.0);
@@ -1320,7 +1415,7 @@ fn render_note_formatting_toolbar(ui: &mut Ui, state: &mut AppState, t: &Tokens)
                     .on_hover_text("Insert [[Note Link]]")
                     .clicked()
                 {
-                    state.insert_snippet_into_active_note("[[]]");
+                    state.apply_inline_format("[[", "]]", "Note");
                 }
 
                 if theme::ghost_button(ui, t, RichText::new("Image").color(t.accent_text).size(11.5).strong())

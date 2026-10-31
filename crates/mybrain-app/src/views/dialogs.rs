@@ -137,6 +137,113 @@ pub fn show_new_note(ctx: &egui::Context, state: &mut AppState) {
     }
 }
 
+pub fn show_rename_note(ctx: &egui::Context, state: &mut AppState) {
+    if !state.show_rename_note_dialog {
+        return;
+    }
+
+    let t = Tokens::get(ctx);
+    let mut should_close = false;
+    let mut rename_action: Option<(mybrain_core::NoteId, String)> = None;
+
+    let modal = egui::Modal::new(Id::unique("rename_note_modal"))
+        .backdrop_color(Color32::from_black_alpha(150))
+        .frame(theme::modal_frame(&t));
+
+    let modal_resp = modal.show(ctx, |ui| {
+        ui.set_width(380.0);
+
+        ui.horizontal(|ui| {
+            ui.heading(RichText::new("Rename or Move Note").color(t.text).strong().size(16.0));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if theme::icon_close_button(ui, &t).clicked() {
+                    should_close = true;
+                }
+            });
+        });
+
+        ui.add_space(6.0);
+        if let Some(target) = &state.rename_note_target {
+            ui.label(
+                RichText::new(format!("Current: {}", target.as_str()))
+                    .color(t.accent_text)
+                    .size(11.5),
+            );
+        }
+
+        ui.add_space(6.0);
+        ui.label(
+            RichText::new("New title or folder path (all [[wiki links]] will update automatically):")
+                .color(t.text_dim)
+                .size(12.0),
+        );
+
+        ui.add_space(4.0);
+        let mut submitted = false;
+        field_frame(&t).show(ui, |ui| {
+            let edit = ui.add(
+                egui::TextEdit::singleline(&mut state.rename_note_new_name)
+                    .hint_text("Projects/Roadmap")
+                    .frame(Frame::NONE)
+                    .desired_width(f32::INFINITY),
+            );
+            edit.request_focus();
+            submitted = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        });
+
+        let typed_name = state.rename_note_new_name.trim();
+        let target_folder = typed_name
+            .rfind('/')
+            .map(|slash_idx| &typed_name[..slash_idx]);
+        let is_reserved = target_folder
+            .map(|f| state.is_reserved_special_folder(f))
+            .unwrap_or(false);
+
+        if is_reserved {
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new("⚠️ Cannot move normal notes into Daily or Quick Notes folders.")
+                    .color(t.warning)
+                    .size(11.5),
+            );
+        }
+
+        ui.add_space(14.0);
+
+        ui.horizontal(|ui| {
+            let can_rename = !is_reserved && !typed_name.is_empty() && state.rename_note_target.is_some();
+            if ui
+                .add_enabled(
+                    can_rename,
+                    egui::Button::new(RichText::new("Rename Note").color(Color32::WHITE).strong())
+                        .fill(t.accent)
+                        .stroke(Stroke::NONE)
+                        .corner_radius(CornerRadius::same(t.radius_sm as u8)),
+                )
+                .clicked()
+                || (submitted && can_rename)
+            {
+                if let Some(from) = state.rename_note_target.clone() {
+                    rename_action = Some((from, state.rename_note_new_name.clone()));
+                }
+                should_close = true;
+            }
+
+            if theme::ghost_button(ui, &t, RichText::new("Cancel").color(t.text_dim)).clicked() {
+                should_close = true;
+            }
+        });
+    });
+
+    if let Some((from, new_name)) = rename_action {
+        state.rename_note(&from, &new_name);
+    }
+    if modal_resp.should_close() || should_close {
+        state.show_rename_note_dialog = false;
+        state.rename_note_target = None;
+    }
+}
+
 pub fn show_new_event(ctx: &egui::Context, state: &mut AppState) {
     if !state.show_new_event_dialog {
         return;

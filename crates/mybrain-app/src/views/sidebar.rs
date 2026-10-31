@@ -21,6 +21,7 @@ enum TreeAction {
     Folder(FolderAction),
     SetNoteColor(NoteId, Option<String>),
     SetNoteEmoji(NoteId, Option<String>),
+    RenameNote(NoteId),
     DeleteNote(NoteId),
     SetFolderEmoji(String, Option<String>),
     OpenEmojiPicker(crate::state::EmojiPickerTarget),
@@ -228,7 +229,11 @@ fn render_note_item(
         });
 
         ui.separator();
-        if ui.button("Delete Note").clicked() {
+        if ui.button("✏️ Rename / Move Note…").clicked() {
+            *tree_action = Some(TreeAction::RenameNote(id.clone()));
+            ui.close();
+        }
+        if ui.button("🗑 Delete Note").clicked() {
             *tree_action = Some(TreeAction::DeleteNote(id.clone()));
             ui.close();
         }
@@ -657,11 +662,16 @@ fn render_notes_section(ui: &mut Ui, state: &mut AppState, t: &Tokens) {
             TreeAction::SetNoteEmoji(id, emoji) => {
                 state.set_note_emoji(&id, emoji.as_deref());
             }
+            TreeAction::RenameNote(id) => {
+                state.open_rename_note_dialog(id);
+            }
             TreeAction::DeleteNote(id) => {
                 if state.active_note.as_ref() == Some(&id) {
                     state.delete_current_note();
                 } else {
+                    state.open_tabs.retain(|t| t != &id);
                     let _ = state.vault.delete(&id);
+                    state.link_index = mybrain_core::LinkIndex::build(&state.vault);
                 }
             }
             TreeAction::SetFolderEmoji(path, emoji) => {

@@ -45,6 +45,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
         if backlinks.is_empty() {
             ui.label(RichText::new("No incoming backlinks").color(t.text_faint).size(11.5));
+        } else {
             for bl in backlinks {
                 let source_id = bl.source.clone();
                 let source_color = state.get_note_color(&source_id);

@@ -125,81 +125,95 @@ pub fn show_keep_view(ui: &mut Ui, state: &mut AppState) {
 
     ScrollArea::vertical()
         .id_salt("quick_notes_scroll")
+        .auto_shrink([false, false])
         .show(ui, |ui| {
-            ui.add_space(20.0);
-            ui.vertical_centered(|ui| {
-                let max_board_w = (ui.available_width() - 40.0).clamp(320.0, 1200.0);
-                ui.set_max_width(max_board_w);
+            Frame::NONE
+                .inner_margin(Margin::symmetric(28, 20))
+                .show(ui, |ui| {
+                    let avail_w = ui.available_width();
+                    let max_board_w = avail_w.clamp(240.0, 1200.0);
+                    let side_pad = ((avail_w - max_board_w) * 0.5).max(0.0);
 
-                // 1. "Take a note..." Creator Card at the top
-                render_composer_bar(ui, state, &t);
-
-                ui.add_space(24.0);
-
-                // Fetch and partition all quick notes
-                let all_notes = state.quick_config.all(&state.vault);
-
-                // Filter if search query is active
-                let filtered: Vec<&Note> = if !state.quick_search_query.trim().is_empty() {
-                    let q = state.quick_search_query.trim().to_lowercase();
-                    all_notes
-                        .into_iter()
-                        .filter(|n| {
-                            n.title().to_lowercase().contains(&q)
-                                || n.body().to_lowercase().contains(&q)
-                        })
-                        .collect()
-                } else {
-                    all_notes
-                };
-
-                let mut pinned_notes: Vec<&Note> = Vec::new();
-                let mut other_notes: Vec<&Note> = Vec::new();
-
-                for note in filtered {
-                    if note.frontmatter().get("pinned") == Some("true") {
-                        pinned_notes.push(note);
-                    } else {
-                        other_notes.push(note);
-                    }
-                }
-
-                if pinned_notes.is_empty() && other_notes.is_empty() {
-                    render_empty_state(ui, &t);
-                } else {
-                    // Pinned Notes Section
-                    if !pinned_notes.is_empty() {
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new("PINNED")
-                                    .size(11.0)
-                                    .color(t.text_faint)
-                                    .strong(),
-                            );
-                        });
-                        ui.add_space(6.0);
-                        render_masonry_grid(ui, &pinned_notes, &t, &mut actions);
-                        ui.add_space(24.0);
-                    }
-
-                    // Others Section
-                    if !other_notes.is_empty() {
-                        if !pinned_notes.is_empty() {
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    RichText::new("OTHERS")
-                                        .size(11.0)
-                                        .color(t.text_faint)
-                                        .strong(),
-                                );
-                            });
-                            ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if side_pad > 0.0 {
+                            ui.add_space(side_pad);
                         }
-                        render_masonry_grid(ui, &other_notes, &t, &mut actions);
-                    }
-                }
-            });
-            ui.add_space(40.0);
+                        ui.vertical(|ui| {
+                            ui.set_max_width(max_board_w);
+
+                            // 1. "Take a note..." Creator Card at the top
+                            ui.vertical_centered(|ui| {
+                                render_composer_bar(ui, state, &t);
+                            });
+
+                            ui.add_space(24.0);
+
+                            // Fetch and partition all quick notes
+                            let all_notes = state.quick_config.all(&state.vault);
+
+                            // Filter if search query is active
+                            let filtered: Vec<&Note> = if !state.quick_search_query.trim().is_empty() {
+                                let q = state.quick_search_query.trim().to_lowercase();
+                                all_notes
+                                    .into_iter()
+                                    .filter(|n| {
+                                        n.title().to_lowercase().contains(&q)
+                                            || n.body().to_lowercase().contains(&q)
+                                    })
+                                    .collect()
+                            } else {
+                                all_notes
+                            };
+
+                            let mut pinned_notes: Vec<&Note> = Vec::new();
+                            let mut other_notes: Vec<&Note> = Vec::new();
+
+                            for note in filtered {
+                                if note.frontmatter().get("pinned") == Some("true") {
+                                    pinned_notes.push(note);
+                                } else {
+                                    other_notes.push(note);
+                                }
+                            }
+
+                            if pinned_notes.is_empty() && other_notes.is_empty() {
+                                render_empty_state(ui, &t);
+                            } else {
+                                // Pinned Notes Section
+                                if !pinned_notes.is_empty() {
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            RichText::new("PINNED")
+                                                .size(11.0)
+                                                .color(t.text_faint)
+                                                .strong(),
+                                        );
+                                    });
+                                    ui.add_space(6.0);
+                                    render_masonry_grid(ui, &pinned_notes, &t, &mut actions);
+                                    ui.add_space(24.0);
+                                }
+
+                                // Others Section
+                                if !other_notes.is_empty() {
+                                    if !pinned_notes.is_empty() {
+                                        ui.horizontal(|ui| {
+                                            ui.label(
+                                                RichText::new("OTHERS")
+                                                    .size(11.0)
+                                                    .color(t.text_faint)
+                                                    .strong(),
+                                            );
+                                        });
+                                        ui.add_space(6.0);
+                                    }
+                                    render_masonry_grid(ui, &other_notes, &t, &mut actions);
+                                }
+                            }
+                        });
+                    });
+                    ui.add_space(20.0);
+                });
         });
 
     // Process actions after UI traversal

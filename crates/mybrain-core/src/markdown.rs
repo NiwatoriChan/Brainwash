@@ -23,8 +23,9 @@ pub enum Block<'a> {
     Heading { level: u8, text: &'a str },
     Paragraph(&'a str),
     ListItem { indent: usize, marker: ListMarker, text: &'a str },
-    Quote(&'a str),
+    Quote(String),
     Code { lang: &'a str, code: String },
+    Table { headers: Vec<&'a str>, rows: Vec<Vec<&'a str>> },
     Rule,
     Blank,
 }
@@ -41,6 +42,7 @@ pub enum Inline<'a> {
     Text(&'a str),
     Bold(&'a str),
     Italic(&'a str),
+    Strikethrough(&'a str),
     Code(&'a str),
     Url(&'a str),
     Tag(&'a str),
@@ -77,12 +79,80 @@ pub fn parse_blocks(content: &str) -> Vec<LineBlock<'_>> {
             continue;
         }
 
+        // Group consecutive `>` blockquote / callout lines into a single Block::Quote
+        if let Some(first_quote) = trimmed.strip_prefix('>') {
+            let mut quote_text = String::from(first_quote.trim_start());
+            while let Some(&(_, next_line)) = lines.peek() {
+                if let Some(next_quote) = next_line.trim_start().strip_prefix('>') {
+                    lines.next();
+                    quote_text.push('\n');
+                    quote_text.push_str(next_quote.trim_start());
+                } else {
+                    break;
+                }
+            }
+            blocks.push(LineBlock {
+                line: line_no,
+                block: Block::Quote(quote_text),
+            });
+            continue;
+        }
+
+        // Parse Markdown pipe tables (`| Header |` followed by `| --- |`)
+        if is_table_row(trimmed) {
+            if let Some(&(_, next_line)) = lines.peek() {
+                if is_table_separator(next_line.trim()) {
+                    lines.next(); // consume separator row
+                    let headers = parse_table_cells(trimmed);
+                    let mut rows = Vec::new();
+                    while let Some(&(_, row_line)) = lines.peek() {
+                        let row_trimmed = row_line.trim();
+                        if is_table_row(row_trimmed) && !is_table_separator(row_trimmed) {
+                            lines.next();
+                            rows.push(parse_table_cells(row_trimmed));
+                        } else {
+                            break;
+                        }
+                    }
+                    blocks.push(LineBlock {
+                        line: line_no,
+                        block: Block::Table { headers, rows },
+                    });
+                    continue;
+                }
+            }
+        }
+
         blocks.push(LineBlock {
             line: line_no,
             block: parse_line(line),
         });
     }
     blocks
+}
+
+fn is_table_row(trimmed: &str) -> bool {
+    let t = trimmed.trim();
+    t.starts_with('|') && t.ends_with('|') && t.len() > 2
+}
+
+fn is_table_separator(trimmed: &str) -> bool {
+    if !is_table_row(trimmed) {
+        return false;
+    }
+    let cells = parse_table_cells(trimmed);
+    !cells.is_empty()
+        && cells.iter().all(|c| {
+            let c = c.trim();
+            !c.is_empty()
+                && c.chars().any(|ch| ch == '-')
+                && c.chars().all(|ch| ch == '-' || ch == ':')
+        })
+}
+
+fn parse_table_cells(trimmed: &str) -> Vec<&str> {
+    let inner = trimmed.trim().trim_start_matches('|').trim_end_matches('|');
+    inner.split('|').map(str::trim).collect()
 }
 
 fn parse_line(line: &str) -> Block<'_> {
@@ -99,7 +169,7 @@ fn parse_line(line: &str) -> Block<'_> {
         return block;
     }
     if let Some(rest) = trimmed.strip_prefix('>') {
-        return Block::Quote(rest.trim_start());
+        return Block::Quote(rest.trim_start().to_owned());
     }
     if let Some(rest) = trimmed
         .strip_prefix("- ")
@@ -160,7 +230,62 @@ pub fn parse_inline(text: &str) -> Vec<Inline<'_>> {
         out.push(Inline::Link(link));
     }
     parse_inline_plain(&text[last..], &mut out);
+    normalize_paired_bold_across_links(&mut out);
     out
+}
+
+/// Cleans up `**...` before a `[[WikiLink]]` and `...**` after it so patterns like
+/// `**Double-brackets [[Wiki Links]]**` render as bold text + link without raw `**`.
+fn normalize_paired_bold_across_links<'a>(spans: &mut Vec<Inline<'a>>) {
+    let mut open_idx: Option<(usize, &'a str, &'a str)> = None;
+    let mut pairs = Vec::new();
+
+    for (idx, span) in spans.iter().enumerate() {
+        if let Inline::Text(txt) = span {
+            if open_idx.is_none() {
+                if let Some(pos) = txt.find("**") {
+                    let before = &txt[..pos];
+                    let after = &txt[pos + 2..];
+                    if !after.contains("**") {
+                        open_idx = Some((idx, before, after));
+                    }
+                }
+            } else if let Some(pos) = txt.find("**") {
+                let (start_i, before_open, after_open) = open_idx.take().unwrap();
+                let before_close = &txt[..pos];
+                let after_close = &txt[pos + 2..];
+                pairs.push((start_i, before_open, after_open, idx, before_close, after_close));
+            }
+        }
+    }
+
+    for (start_i, before_open, after_open, end_i, before_close, after_close) in pairs.into_iter().rev() {
+        // Replace end_i first so indices at start_i stay valid
+        let mut end_repl = Vec::new();
+        if !before_close.is_empty() {
+            end_repl.push(Inline::Bold(before_close));
+        }
+        if !after_close.is_empty() {
+            end_repl.push(Inline::Text(after_close));
+        }
+        spans.splice(end_i..=end_i, end_repl);
+
+        // Promote any intermediate plain text spans to Bold
+        for mid in (start_i + 1)..end_i {
+            if let Inline::Text(mid_txt) = spans[mid] {
+                spans[mid] = Inline::Bold(mid_txt);
+            }
+        }
+
+        let mut start_repl = Vec::new();
+        if !before_open.is_empty() {
+            start_repl.push(Inline::Text(before_open));
+        }
+        if !after_open.is_empty() {
+            start_repl.push(Inline::Bold(after_open));
+        }
+        spans.splice(start_i..=start_i, start_repl);
+    }
 }
 
 /// Inline parsing for text known not to contain wiki links.
@@ -195,6 +320,10 @@ fn parse_inline_plain<'a>(text: &'a str, out: &mut Vec<Inline<'a>>) {
             }
         } else if let Some(r) = rest.strip_prefix('`') {
             r.find('`').map(|end| (Inline::Code(&r[..end]), end + 2))
+        } else if let Some(r) = rest.strip_prefix("~~") {
+            r.find("~~")
+                .filter(|&end| end > 0)
+                .map(|end| (Inline::Strikethrough(&r[..end]), end + 4))
         } else if let Some(r) = rest.strip_prefix("**").or_else(|| rest.strip_prefix("__")) {
             let delim = &rest[..2];
             r.find(delim)
@@ -284,9 +413,25 @@ mod tests {
                     marker: ListMarker::Ordered("1".into()),
                     text: "first"
                 },
-                Block::Quote("quote"),
+                Block::Quote("quote".into()),
                 Block::Rule,
                 Block::Paragraph("#tag line"),
+            ]
+        );
+    }
+
+    #[test]
+    fn multiline_quotes_and_tables() {
+        let src = "> [!NOTE]\n> Line 1\n> Line 2\n\n| Col A | Col B |\n| --- | --- |\n| 1 | 2 |\n";
+        assert_eq!(
+            blocks(src),
+            vec![
+                Block::Quote("[!NOTE]\nLine 1\nLine 2".into()),
+                Block::Blank,
+                Block::Table {
+                    headers: vec!["Col A", "Col B"],
+                    rows: vec![vec!["1", "2"]],
+                },
             ]
         );
     }
@@ -312,6 +457,7 @@ mod tests {
                 Inline::Text(t) => format!("T({t})"),
                 Inline::Bold(t) => format!("B({t})"),
                 Inline::Italic(t) => format!("I({t})"),
+                Inline::Strikethrough(t) => format!("S({t})"),
                 Inline::Code(t) => format!("C({t})"),
                 Inline::Url(t) => format!("U({t})"),
                 Inline::Tag(t) => format!("#({t})"),
