@@ -59,12 +59,13 @@ impl AppShell {
         let event_bus = EventBus::new();
         let mut plugins = PluginRegistry::new();
 
-        // Register all 9 built-in plugins
+        // Register all 10 built-in plugins
         plugins.register(crate::plugins::explorer::ExplorerPlugin::new(), settings.is_plugin_enabled("core.explorer"));
         plugins.register(crate::plugins::markdown::MarkdownPlugin::new(), settings.is_plugin_enabled("core.markdown"));
         plugins.register(crate::plugins::quick_note::QuickNotePlugin::new(), settings.is_plugin_enabled("core.quick_note"));
         plugins.register(crate::plugins::daily::DailyPlugin::new(), settings.is_plugin_enabled("core.daily"));
         plugins.register(crate::plugins::canvas::CanvasPlugin::new(), settings.is_plugin_enabled("core.canvas"));
+        plugins.register(crate::plugins::drawing::DrawingPlugin::new(), settings.is_plugin_enabled("core.drawing") || settings.is_plugin_enabled("core.noteful"));
         plugins.register(crate::plugins::graph::GraphPlugin::new(), settings.is_plugin_enabled("core.graph"));
         plugins.register(crate::plugins::events::EventsPlugin::new(), settings.is_plugin_enabled("core.events"));
         plugins.register(crate::plugins::backlinks::BacklinksPlugin::new(), settings.is_plugin_enabled("core.backlinks"));
@@ -375,6 +376,13 @@ impl AppShell {
                         self.active_main_plugin = Some("core.canvas".into());
                     }
                 }
+                AppEvent::RequestOpenDrawing(_) | AppEvent::RequestOpenNoteful(_) => {
+                    if self.plugins.is_enabled("core.drawing") {
+                        self.active_main_plugin = Some("core.drawing".into());
+                    } else if self.plugins.is_enabled("core.noteful") {
+                        self.active_main_plugin = Some("core.noteful".into());
+                    }
+                }
                 AppEvent::NoteDeleted(id) => {
                     if self.active_note.as_ref() == Some(id) {
                         self.active_note = None;
@@ -449,6 +457,14 @@ impl AppShell {
             if i.modifiers.command && i.key_pressed(egui::Key::Num3) {
                 if self.plugins.is_enabled("core.graph") {
                     self.active_main_plugin = Some("core.graph".into());
+                }
+            }
+            // Ctrl+4: Drawing Documents
+            if i.modifiers.command && i.key_pressed(egui::Key::Num4) {
+                if self.plugins.is_enabled("core.drawing") {
+                    self.active_main_plugin = Some("core.drawing".into());
+                } else if self.plugins.is_enabled("core.noteful") {
+                    self.active_main_plugin = Some("core.noteful".into());
                 }
             }
             // Ctrl+Q: Quick Note

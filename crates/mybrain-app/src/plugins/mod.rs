@@ -11,6 +11,8 @@ pub mod events;
 pub mod explorer;
 pub mod graph;
 pub mod markdown;
+pub mod drawing;
+pub use drawing as noteful;
 pub mod quick_note;
 
 use eframe::egui;

@@ -27,6 +27,7 @@ pkgs.mkShell {
     clippy
     rust-analyzer
     pkg-config
+    poppler-utils
   ];
 
   buildInputs = runtimeLibs;

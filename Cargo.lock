@@ -1142,6 +1142,8 @@ dependencies = [
  "num-traits",
  "png",
  "tiff",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -1429,13 +1431,14 @@ dependencies = [
 
 [[package]]
 name = "mybrain-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "dirs",
  "eframe",
  "egui",
  "env_logger",
+ "image",
  "log",
  "mybrain-core",
  "serde",
@@ -1445,7 +1448,7 @@ dependencies = [
 
 [[package]]
 name = "mybrain-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "serde",

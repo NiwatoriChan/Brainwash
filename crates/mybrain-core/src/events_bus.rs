@@ -33,6 +33,10 @@ pub enum AppEvent {
     RequestOpenDaily(NaiveDate),
     /// Request to open a visual canvas file.
     RequestOpenCanvas(String),
+    /// Request to open a drawing document notebook file.
+    RequestOpenDrawing(String),
+    /// Request to open a Noteful / Drawing notebook file (alias).
+    RequestOpenNoteful(String),
     /// Request to show the new note dialog, optionally targeting a folder.
     RequestNewNote(Option<String>),
 }

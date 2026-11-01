@@ -30,6 +30,10 @@ pub mod index;
 pub mod links;
 pub mod markdown;
 pub mod note;
+pub mod drawing;
+pub mod drawing_codec;
+pub use drawing as noteful;
+pub use drawing_codec as noteful_codec;
 pub mod quick;
 pub mod settings;
 pub mod vault;
@@ -43,6 +47,19 @@ pub use frontmatter::Frontmatter;
 pub use index::LinkIndex;
 pub use links::WikiLink;
 pub use note::{Note, NoteId};
+pub use drawing::{
+    recognize_stroke_shape, BackgroundTemplate, NotefulDocument, NotefulLayer, NotefulOutlineItem,
+    NotefulPage, NotefulShape, NotefulTape, NotefulTextBox, PaperColor, PaperOrientation,
+    PdfBackground, PenType, RgbaColor, ShapeKind, StrokePoint, StrokeToolKind, VectorStroke,
+};
+pub use drawing_codec::{DrawingCodec, DrawingCodec as NotefulCodec};
+pub type DrawingDocument = NotefulDocument;
+pub type DrawingPage = NotefulPage;
+pub type DrawingLayer = NotefulLayer;
+pub type DrawingTape = NotefulTape;
+pub type DrawingShape = NotefulShape;
+pub type DrawingTextBox = NotefulTextBox;
+pub type DrawingPdfBackground = PdfBackground;
 pub use quick::QuickNotes;
 pub use settings::AppSettings;
 pub use vault::Vault;

@@ -45,12 +45,13 @@ struct FolderTree {
     subfolders: BTreeMap<String, FolderTree>,
     notes: Vec<NoteId>,
     canvases: Vec<String>,
+    drawings: Vec<String>,
 }
 
 impl FolderTree {
     #[allow(dead_code)]
     fn is_empty(&self) -> bool {
-        self.subfolders.is_empty() && self.notes.is_empty() && self.canvases.is_empty()
+        self.subfolders.is_empty() && self.notes.is_empty() && self.canvases.is_empty() && self.drawings.is_empty()
     }
 
     fn contains_active(&self, active_note: Option<&NoteId>) -> bool {
@@ -169,6 +170,13 @@ impl MyBrainPlugin for ExplorerPlugin {
                     ctx.emit(AppEvent::OpenModal("new_folder".into()));
                 }
 
+                if theme::ghost_button(ui, &t, RichText::new("+ Drawing").color(t.accent_text).size(11.5))
+                    .on_hover_text("Open Drawing Documents")
+                    .clicked()
+                {
+                    ctx.emit(AppEvent::RequestOpenDrawing(String::new()));
+                }
+
                 if theme::ghost_button(ui, &t, RichText::new("+ Note").color(t.accent_text).strong().size(11.5))
                     .on_hover_text("Create new note (Ctrl+N)")
                     .clicked()
@@ -209,6 +217,7 @@ impl MyBrainPlugin for ExplorerPlugin {
         let mut tree_action: Option<TreeAction> = None;
         let mut note_to_open: Option<NoteId> = None;
         let mut canvas_to_open: Option<String> = None;
+        let mut drawing_to_open: Option<String> = None;
 
         ScrollArea::vertical()
             .id_salt("explorer_tree_scroll")
@@ -274,6 +283,19 @@ impl MyBrainPlugin for ExplorerPlugin {
                         }
                     }
 
+                    for drawing_path in ctx.vault.list_drawing_files() {
+                        let parts: Vec<&str> = drawing_path.split('/').collect();
+                        if parts.len() == 1 {
+                            root.drawings.push(drawing_path);
+                        } else {
+                            let mut current = &mut root;
+                            for &part in &parts[..parts.len() - 1] {
+                                current = current.subfolders.entry(part.to_string()).or_default();
+                            }
+                            current.drawings.push(drawing_path);
+                        }
+                    }
+
                     // Render root-level notes first
                     for id in &root.notes {
                         let selected = ctx.active_note == Some(id);
@@ -329,6 +351,15 @@ impl MyBrainPlugin for ExplorerPlugin {
                         }
                     }
 
+                    // Render root drawings
+                    for drawing in &root.drawings {
+                        let label = drawing.split('/').last().unwrap_or(drawing).trim_end_matches(".drawing").trim_end_matches(".noteful").trim_end_matches(".json");
+                        let resp = theme::list_row(ui, &t, false, Some(egui::Color32::from_rgb(251, 146, 60)), &format!("🎨 {label}"), None);
+                        if resp.clicked() {
+                            drawing_to_open = Some(drawing.clone());
+                        }
+                    }
+
                     // Render subfolders recursively
                     for (name, sub) in &root.subfolders {
                         render_folder_recursive(
@@ -343,6 +374,7 @@ impl MyBrainPlugin for ExplorerPlugin {
                             &mut tree_action,
                             &mut note_to_open,
                             &mut canvas_to_open,
+                            &mut drawing_to_open,
                         );
                     }
                 }
@@ -356,6 +388,10 @@ impl MyBrainPlugin for ExplorerPlugin {
 
         if let Some(canvas) = canvas_to_open {
             ctx.emit(AppEvent::RequestOpenCanvas(canvas));
+        }
+
+        if let Some(drawing) = drawing_to_open {
+            ctx.emit(AppEvent::RequestOpenDrawing(drawing));
         }
 
         if let Some(action) = tree_action {
@@ -400,6 +436,7 @@ fn render_folder_recursive(
     tree_action: &mut Option<TreeAction>,
     note_to_open: &mut Option<NoteId>,
     canvas_to_open: &mut Option<String>,
+    drawing_to_open: &mut Option<String>,
 ) {
     let clean_path = full_path.trim_end_matches('/').to_string();
     let is_expanded = expanded_folders.contains(&clean_path) || tree.contains_active(ctx.active_note);
@@ -524,6 +561,18 @@ fn render_folder_recursive(
             });
         }
 
+        for drawing in &tree.drawings {
+            let drawing_indent = indent + 18.0;
+            ui.horizontal(|ui| {
+                ui.add_space(drawing_indent);
+                let label = drawing.split('/').last().unwrap_or(drawing).trim_end_matches(".drawing").trim_end_matches(".noteful").trim_end_matches(".json");
+                let resp = theme::list_row(ui, t, false, Some(egui::Color32::from_rgb(251, 146, 60)), &format!("🎨 {label}"), None);
+                if resp.clicked() {
+                    *drawing_to_open = Some(drawing.clone());
+                }
+            });
+        }
+
         for (sub_name, sub_tree) in &tree.subfolders {
             let next_full = format!("{clean_path}/{sub_name}");
             render_folder_recursive(
@@ -538,6 +587,7 @@ fn render_folder_recursive(
                 tree_action,
                 note_to_open,
                 canvas_to_open,
+                drawing_to_open,
             );
         }
     }

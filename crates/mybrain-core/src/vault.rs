@@ -292,6 +292,92 @@ impl Vault {
         atomic_write(&path, &json)
     }
 
+    /// Returns relative paths of all `*.noteful` and `*.noteful.json` files in the vault.
+    pub fn list_noteful_files(&self) -> Vec<String> {
+        let walker = WalkDir::new(&self.root)
+            .follow_links(true)
+            .into_iter()
+            .filter_entry(|e| e.depth() == 0 || !is_hidden(e.path()));
+
+        let mut res = Vec::new();
+        for entry in walker.filter_map(std::result::Result::ok) {
+            let path = entry.path();
+            if entry.file_type().is_file() {
+                let ext = path.extension().and_then(|e| e.to_str());
+                let is_drawing = ext == Some("noteful")
+                    || ext == Some("drawing")
+                    || path.to_string_lossy().ends_with(".noteful.json")
+                    || path.to_string_lossy().ends_with(".drawing.json");
+                if is_drawing {
+                    if let Ok(rel) = path.strip_prefix(&self.root) {
+                        res.push(rel.to_string_lossy().into_owned());
+                    }
+                }
+            }
+        }
+        res.sort();
+        res
+    }
+
+    /// All drawing documents (.drawing / .noteful) relative to the vault root.
+    pub fn list_drawing_files(&self) -> Vec<String> {
+        self.list_noteful_files()
+    }
+
+    /// All PDF files (.pdf) relative to the vault root.
+    pub fn list_pdf_files(&self) -> Vec<String> {
+        let walker = WalkDir::new(&self.root)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| e.depth() == 0 || !is_hidden(e.path()));
+
+        let mut res = Vec::new();
+        for entry in walker.filter_map(std::result::Result::ok) {
+            let path = entry.path();
+            if entry.file_type().is_file() {
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    if ext.eq_ignore_ascii_case("pdf") {
+                        if let Ok(rel) = path.strip_prefix(&self.root) {
+                            res.push(rel.to_string_lossy().into_owned());
+                        }
+                    }
+                }
+            }
+        }
+        res.sort();
+        res
+    }
+
+    /// Loads a Drawing / Noteful document by path relative to vault root.
+    pub fn load_noteful(&self, rel_path: &str) -> Result<crate::drawing::NotefulDocument> {
+        let path = self.root.join(rel_path);
+        let bytes = fs::read(&path).map_err(|e| Error::io(&path, e))?;
+        crate::drawing_codec::DrawingCodec::decode(&bytes)
+    }
+
+    /// Loads a Drawing document by path relative to vault root.
+    pub fn load_drawing(&self, rel_path: &str) -> Result<crate::drawing::NotefulDocument> {
+        self.load_noteful(rel_path)
+    }
+
+    /// Saves a Noteful document atomically to disk (binary or JSON depending on extension).
+    pub fn save_noteful(&self, rel_path: &str, doc: &crate::drawing::NotefulDocument) -> Result<()> {
+        let path = self.root.join(rel_path);
+        ensure_parent(&path)?;
+        let bytes = if rel_path.ends_with(".noteful.json") || rel_path.ends_with(".drawing.json") {
+            let json = crate::drawing_codec::DrawingCodec::encode_json(doc)?;
+            json.into_bytes()
+        } else {
+            crate::drawing_codec::DrawingCodec::encode_binary(doc)?
+        };
+        atomic_write_bytes(&path, &bytes)
+    }
+
+    /// Saves a Drawing document atomically to disk.
+    pub fn save_drawing(&self, rel_path: &str, doc: &crate::drawing::NotefulDocument) -> Result<()> {
+        self.save_noteful(rel_path, doc)
+    }
+
     /// All directories relative to vault root.
     pub fn all_folders(&self) -> Vec<String> {
         let walker = WalkDir::new(&self.root)
@@ -413,8 +499,12 @@ fn ensure_parent(path: &Path) -> Result<()> {
 }
 
 fn atomic_write(path: &Path, content: &str) -> Result<()> {
-    let tmp = path.with_extension(format!("{NOTE_EXTENSION}.tmp"));
-    fs::write(&tmp, content).map_err(|e| Error::io(&tmp, e))?;
+    atomic_write_bytes(path, content.as_bytes())
+}
+
+fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, bytes).map_err(|e| Error::io(&tmp, e))?;
     fs::rename(&tmp, path).map_err(|e| Error::io(path, e))
 }
 
@@ -536,5 +626,21 @@ mod tests {
 
         let loaded = v.load_canvas("diagrams/flow.canvas").unwrap();
         assert_eq!(loaded.nodes.len(), 1);
+    }
+
+    #[test]
+    fn noteful_save_load_list() {
+        let (_d, v) = vault();
+        assert!(v.list_noteful_files().is_empty());
+
+        let doc = crate::noteful::NotefulDocument::new("Calculus Notes");
+        v.save_noteful("Math/Calculus.noteful", &doc).unwrap();
+
+        let list = v.list_noteful_files();
+        assert_eq!(list, vec!["Math/Calculus.noteful".to_string()]);
+
+        let loaded = v.load_noteful("Math/Calculus.noteful").unwrap();
+        assert_eq!(loaded.title, "Calculus Notes");
+        assert_eq!(loaded.pages.len(), 1);
     }
 }
