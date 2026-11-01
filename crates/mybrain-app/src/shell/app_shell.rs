@@ -641,10 +641,7 @@ impl AppShell {
                         }
 
                         // Settings button
-                        if theme::ghost_button(ui, t, RichText::new("⚙ Settings").color(t.text_dim))
-                            .on_hover_text("Preferences & Plugin Manager (Ctrl+,)")
-                            .clicked()
-                        {
+                        if theme::icon_settings_button(ui, t).clicked() {
                             self.show_settings_dialog = true;
                         }
 
@@ -668,13 +665,7 @@ impl AppShell {
                             } else {
                                 t.text_dim
                             };
-                            painter.text(
-                                btn_rect.center(),
-                                Align2::CENTER_CENTER,
-                                "🔗",
-                                egui::FontId::proportional(14.0),
-                                icon_color,
-                            );
+                            theme::paint_link_icon(painter, btn_rect, icon_color);
                         }
                         if btn_resp
                             .on_hover_text("Toggle Connections & Backlinks (Ctrl+Shift+B)")

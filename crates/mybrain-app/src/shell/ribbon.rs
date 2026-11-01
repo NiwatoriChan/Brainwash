@@ -151,10 +151,28 @@ fn render_ribbon_icon_button(
         t.text_dim
     };
 
-    if icon == "calendar" || icon == "📅" || icon == "🗓" {
+    if icon == "calendar" || icon == "📅" || icon == "🗓" || icon == "events" {
         theme::paint_calendar_icon(ui.painter(), rect, color);
-    } else if icon == "graph" || icon == "🕸️" {
+    } else if icon == "graph" || icon == "🕸" || icon == "🕸️" {
         theme::paint_graph_icon(ui.painter(), rect, color);
+    } else if icon == "folder" || icon == "📁" || icon == "explorer" {
+        theme::paint_folder_icon(ui.painter(), rect, color);
+    } else if icon == "drawing" || icon == "🎨" || icon == "palette" {
+        theme::paint_drawing_icon(ui.painter(), rect, color);
+    } else if icon == "quick_note" || icon == "⚡" || icon == "bolt" {
+        theme::paint_bolt_icon(ui.painter(), rect, color);
+    } else if icon == "search" || icon == "🔍" {
+        theme::paint_search_icon(ui.painter(), rect.center(), 14.0, color);
+    } else if icon == "vault" || icon == "🗄" || icon == "🗄️" {
+        theme::paint_vault_icon(ui.painter(), rect, color);
+    } else if icon == "settings" || icon == "⚙" || icon == "⚙️" {
+        theme::paint_gear_icon(ui.painter(), rect, color);
+    } else if icon == "link" || icon == "🔗" || icon == "backlinks" {
+        theme::paint_link_icon(ui.painter(), rect, color);
+    } else if icon == "notes" || icon == "pencil" || icon == "📝" {
+        theme::paint_pencil_icon(ui.painter(), rect, color);
+    } else if icon == "canvas" {
+        theme::paint_canvas_icon(ui.painter(), rect, color);
     } else {
         ui.painter().text(
             rect.center(),

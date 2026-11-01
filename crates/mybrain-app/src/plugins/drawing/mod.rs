@@ -610,14 +610,8 @@ impl DrawingPlugin {
                                     tab_to_select = Some(tab_path.clone());
                                 }
 
-                                if self.open_tabs.len() > 1 {
-                                    let close_btn = ui.add(
-                                        egui::Label::new(RichText::new("×").size(13.0).color(t.text_faint))
-                                            .sense(Sense::click()),
-                                    );
-                                    if close_btn.on_hover_text("Close tab").clicked() {
-                                        tab_to_close = Some(tab_path.clone());
-                                    }
+                                if self.open_tabs.len() > 1 && theme::icon_close_button(ui, t).clicked() {
+                                    tab_to_close = Some(tab_path.clone());
                                 }
                             });
                         });
@@ -677,7 +671,7 @@ impl DrawingPlugin {
                     let tools = [
                         (ActiveTool::Pen, "✍ Pen", "Vector Pen with smooth Catmull-Rom inking"),
                         (ActiveTool::Highlighter, "🖍 Highl.", "Translucent highlighter behind ink"),
-                        (ActiveTool::Eraser, "🧹 Eraser", "Stroke / Segment eraser with filters"),
+                        (ActiveTool::Eraser, "Eraser", "Stroke / Segment eraser with filters"),
                         (ActiveTool::Tape, "🩹 Tape", "Active Recall Study Tape (tap to reveal)"),
                         (ActiveTool::Lasso, "✂ Lasso", "Select, move, duplicate, and recolor elements"),
                         (ActiveTool::Shape, "🔷 Shape", "Lines, rectangles, and ellipses with snapping"),
@@ -838,7 +832,7 @@ impl DrawingPlugin {
                         // Layers Drawer Toggle
                         let layer_count = self.doc.pages.get(self.active_page_idx).map(|p| p.layers.len()).unwrap_or(1);
                         let layer_btn = ui.add(
-                            egui::Button::new(RichText::new(format!("🥞 Layers ({layer_count})")).size(12.0).color(if self.show_layers_drawer { t.accent_text } else { t.text }))
+                            egui::Button::new(RichText::new(format!("Layers ({layer_count})")).size(12.0).color(if self.show_layers_drawer { t.accent_text } else { t.text }))
                                 .fill(if self.show_layers_drawer { t.accent } else { t.field })
                                 .corner_radius(CornerRadius::same(t.radius_sm as u8)),
                         );
@@ -1662,7 +1656,7 @@ impl DrawingPlugin {
                 .inner_margin(Margin::same(8))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("🥞 Layers").strong().size(13.0));
+                        ui.label(RichText::new("Layers").strong().size(13.0));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui.add(egui::Button::new(RichText::new("＋ Add Layer").size(11.0))).clicked() {
                                 if let Some(page) = self.doc.pages.get_mut(self.active_page_idx) {
@@ -1702,14 +1696,22 @@ impl DrawingPlugin {
 
                                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                                 // Lock toggle
-                                                let lock_icon = if layer.locked { "🔒" } else { "🔓" };
-                                                if ui.add(egui::Label::new(lock_icon).sense(Sense::click())).clicked() {
+                                                let (lock_rect, lock_resp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
+                                                if ui.is_rect_visible(lock_rect) {
+                                                    let col = if lock_resp.hovered() { t.text } else { t.text_dim };
+                                                    theme::paint_lock_icon(ui.painter(), lock_rect, col, layer.locked);
+                                                }
+                                                if lock_resp.on_hover_text(if layer.locked { "Unlock layer" } else { "Lock layer" }).clicked() {
                                                     layer.locked = !layer.locked;
                                                 }
 
                                                 // Visibility eye toggle
-                                                let eye_icon = if layer.visible { "👁" } else { "🚫" };
-                                                if ui.add(egui::Label::new(eye_icon).sense(Sense::click())).clicked() {
+                                                let (eye_rect, eye_resp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
+                                                if ui.is_rect_visible(eye_rect) {
+                                                    let col = if eye_resp.hovered() { t.text } else { t.text_dim };
+                                                    theme::paint_eye_icon(ui.painter(), eye_rect, col, layer.visible);
+                                                }
+                                                if eye_resp.on_hover_text(if layer.visible { "Hide layer" } else { "Show layer" }).clicked() {
                                                     layer.visible = !layer.visible;
                                                 }
                                             });

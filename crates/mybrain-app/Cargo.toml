@@ -24,6 +24,7 @@ dirs.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+walkdir.workspace = true
 
 [lints]
 workspace = true

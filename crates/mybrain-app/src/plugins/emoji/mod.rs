@@ -69,9 +69,9 @@ pub const EMOJI_DATABASE: &[EmojiDef] = &[
     EmojiDef { emoji: "🔥", name: "Fire", category: "Projects", keywords: "fire hot trend urgent priority" },
     EmojiDef { emoji: "🎨", name: "Art Palette", category: "Projects", keywords: "palette canvas art design visual" },
     EmojiDef { emoji: "🔬", name: "Microscope", category: "Projects", keywords: "science research experiment lab" },
-    EmojiDef { emoji: "🧪", name: "Test Tube", category: "Projects", keywords: "test chemistry experiment lab" },
+    EmojiDef { emoji: "⚗️", name: "Alembic", category: "Projects", keywords: "test chemistry experiment lab" },
     EmojiDef { emoji: "🔮", name: "Crystal Ball", category: "Projects", keywords: "crystal ball magic future predict" },
-    EmojiDef { emoji: "🧩", name: "Puzzle", category: "Projects", keywords: "puzzle game component piece solve" },
+    EmojiDef { emoji: "🎲", name: "Dice", category: "Projects", keywords: "dice game component piece solve" },
     EmojiDef { emoji: "🛠️", name: "Tools", category: "Projects", keywords: "tools hammer wrench repair dev" },
     EmojiDef { emoji: "⚙️", name: "Gear", category: "Projects", keywords: "gear settings config machinery" },
     EmojiDef { emoji: "💻", name: "Laptop", category: "Projects", keywords: "laptop computer dev code software" },
@@ -79,8 +79,8 @@ pub const EMOJI_DATABASE: &[EmojiDef] = &[
     EmojiDef { emoji: "⌨️", name: "Keyboard", category: "Projects", keywords: "keyboard typing input dev" },
     EmojiDef { emoji: "📱", name: "Mobile", category: "Projects", keywords: "mobile phone app smartphone" },
     EmojiDef { emoji: "🌐", name: "Globe", category: "Projects", keywords: "web world internet network" },
-    EmojiDef { emoji: "🤖", name: "Robot", category: "Projects", keywords: "robot ai bot machine agent" },
-    EmojiDef { emoji: "🧠", name: "Brain", category: "Projects", keywords: "brain mind knowledge think" },
+    EmojiDef { emoji: "👾", name: "Alien Monster", category: "Projects", keywords: "robot ai bot machine agent game" },
+    EmojiDef { emoji: "💡", name: "Idea", category: "Projects", keywords: "brain mind knowledge think idea" },
     EmojiDef { emoji: "🔍", name: "Magnifier Left", category: "Projects", keywords: "search find inspect discover" },
     EmojiDef { emoji: "🔎", name: "Magnifier Right", category: "Projects", keywords: "search zoom examine details" },
 
@@ -119,7 +119,7 @@ pub const EMOJI_DATABASE: &[EmojiDef] = &[
     EmojiDef { emoji: "🎓", name: "Graduation", category: "Life", keywords: "graduation university degree study" },
     EmojiDef { emoji: "💰", name: "Money Bag", category: "Life", keywords: "money finance salary budget" },
     EmojiDef { emoji: "💳", name: "Credit Card", category: "Life", keywords: "credit card banking payments" },
-    EmojiDef { emoji: "🛒", name: "Shopping Cart", category: "Life", keywords: "cart shopping buy store items" },
+    EmojiDef { emoji: "📦", name: "Package", category: "Life", keywords: "cart shopping buy store items package" },
     EmojiDef { emoji: "👥", name: "People", category: "Life", keywords: "team group members users meeting" },
     EmojiDef { emoji: "👤", name: "Person", category: "Life", keywords: "user profile contact account" },
     EmojiDef { emoji: "💬", name: "Speech Bubble", category: "Life", keywords: "chat comment talk discussion" },
@@ -151,7 +151,7 @@ pub const EMOJI_DATABASE: &[EmojiDef] = &[
     EmojiDef { emoji: "👎", name: "Thumbs Down", category: "Life", keywords: "thumbs down disagree bad dislike" },
     EmojiDef { emoji: "🎉", name: "Party Popper", category: "Life", keywords: "party celebration celebrate event win" },
     EmojiDef { emoji: "🏆", name: "Trophy", category: "Life", keywords: "trophy winner champion award prize" },
-    EmojiDef { emoji: "🥇", name: "1st Medal", category: "Life", keywords: "medal first gold achievement" },
+    EmojiDef { emoji: "🎖️", name: "Medal", category: "Life", keywords: "medal first gold achievement award" },
 ];
 
 pub struct EmojiPlugin {

@@ -647,7 +647,7 @@ impl MyBrainPlugin for MarkdownPlugin {
                             // Section 2: Note Emoji
                             ui.label(RichText::new("Emoji:").size(11.5).color(t.text_faint));
                             ui.horizontal_wrapped(|ui| {
-                                for em in ["📝", "📄", "💡", "🚀", "⭐", "📌", "🎯", "🔍", "🏷️", "💼", "📚", "🎨", "⚙️", "🌿", "⚡", "💬", "🧪", "📅"] {
+                                for em in ["📝", "📄", "💡", "🚀", "⭐", "📌", "🎯", "🔍", "🏷️", "💼", "📚", "🎨", "⚙️", "🌿", "⚡", "💬", "🔬", "📅"] {
                                     if ui.button(RichText::new(em).color(icon_color)).clicked() {
                                         emoji_to_set = Some(Some(em.to_string()));
                                         ui.close();

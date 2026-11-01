@@ -955,36 +955,148 @@ pub fn paint_canvas_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
 
 /// Paint a clean vector folder icon.
 pub fn paint_folder_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
-    let stroke = Stroke::new(1.2, color);
-    let min = rect.min;
-    let size = rect.size();
-    let body = Rect::from_min_max(
-        pos2(min.x + size.x * 0.1, min.y + size.y * 0.32),
-        pos2(min.x + size.x * 0.9, min.y + size.y * 0.82),
-    );
+    let stroke = Stroke::new(1.3, color);
+    let center = rect.center();
+    let box_w = rect.width().min(16.0);
+    let box_h = (box_w * 0.75).min(12.0);
+    let body = Rect::from_center_size(center + vec2(0.0, 1.2), vec2(box_w, box_h));
     painter.rect_stroke(body, CornerRadius::same(1), stroke, egui::StrokeKind::Inside);
     // Tab on top
-    painter.line_segment(
-        [
-            pos2(min.x + size.x * 0.1, min.y + size.y * 0.32),
-            pos2(min.x + size.x * 0.1, min.y + size.y * 0.2),
-        ],
+    let tab_top = body.top() - 2.5;
+    let tab_right = body.left() + box_w * 0.45;
+    painter.line_segment([pos2(body.left() + 1.0, body.top()), pos2(body.left() + 1.0, tab_top)], stroke);
+    painter.line_segment([pos2(body.left() + 1.0, tab_top), pos2(tab_right, tab_top)], stroke);
+    painter.line_segment([pos2(tab_right, tab_top), pos2(tab_right + 2.0, body.top())], stroke);
+}
+
+/// Paint a crisp vector artist palette / drawing icon.
+pub fn paint_drawing_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let center = rect.center();
+    let stroke = Stroke::new(1.3, color);
+    let body = Rect::from_center_size(center, vec2(15.0, 13.0));
+    painter.rect(
+        body,
+        CornerRadius { nw: 6, ne: 6, se: 6, sw: 3 },
+        Color32::TRANSPARENT,
         stroke,
+        egui::StrokeKind::Inside,
     );
-    painter.line_segment(
-        [
-            pos2(min.x + size.x * 0.1, min.y + size.y * 0.2),
-            pos2(min.x + size.x * 0.45, min.y + size.y * 0.2),
-        ],
-        stroke,
-    );
-    painter.line_segment(
-        [
-            pos2(min.x + size.x * 0.45, min.y + size.y * 0.2),
-            pos2(min.x + size.x * 0.55, min.y + size.y * 0.32),
-        ],
-        stroke,
-    );
+    // Thumb hole
+    painter.circle_stroke(center + vec2(3.2, 2.2), 1.5, stroke);
+    // 3 paint dot swatches
+    painter.circle_filled(center + vec2(-3.5, -2.5), 1.6, Color32::from_rgb(235, 87, 87));
+    painter.circle_filled(center + vec2(0.5, -3.5), 1.6, Color32::from_rgb(242, 201, 76));
+    painter.circle_filled(center + vec2(-3.8, 2.2), 1.6, Color32::from_rgb(45, 156, 219));
+}
+
+/// Paint a crisp vector lightning bolt icon for Quick Notes.
+pub fn paint_bolt_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let c = rect.center();
+    let points = vec![
+        pos2(c.x + 1.0, c.y - 7.0),
+        pos2(c.x - 4.5, c.y + 0.5),
+        pos2(c.x - 0.5, c.y + 0.5),
+        pos2(c.x - 1.5, c.y + 7.5),
+        pos2(c.x + 4.5, c.y - 0.5),
+        pos2(c.x + 0.5, c.y - 0.5),
+    ];
+    painter.add(egui::Shape::convex_polygon(points, color, Stroke::NONE));
+}
+
+/// Paint a clean vector filing cabinet / vault icon.
+pub fn paint_vault_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let center = rect.center();
+    let cabinet = Rect::from_center_size(center, vec2(13.0, 15.0));
+    let stroke = Stroke::new(1.3, color);
+    painter.rect_stroke(cabinet, CornerRadius::same(2), stroke, egui::StrokeKind::Inside);
+    // Horizontal drawer divider
+    painter.line_segment([pos2(cabinet.left(), center.y), pos2(cabinet.right(), center.y)], stroke);
+    // Drawer handles
+    let handle_stroke = Stroke::new(1.8, color);
+    painter.line_segment([pos2(center.x - 2.5, center.y - 3.8), pos2(center.x + 2.5, center.y - 3.8)], handle_stroke);
+    painter.line_segment([pos2(center.x - 2.5, center.y + 3.8), pos2(center.x + 2.5, center.y + 3.8)], handle_stroke);
+}
+
+/// Paint a clean vector gear / settings icon.
+pub fn paint_gear_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let c = rect.center();
+    let stroke = Stroke::new(1.4, color);
+    painter.circle_stroke(c, 3.8, stroke);
+    painter.circle_filled(c, 1.8, Color32::TRANSPARENT);
+    // 6 gear teeth
+    for i in 0..6 {
+        let angle = i as f32 * std::f32::consts::PI / 3.0;
+        let dir = vec2(angle.cos(), angle.sin());
+        let p1 = c + dir * 3.8;
+        let p2 = c + dir * 6.5;
+        painter.line_segment([p1, p2], Stroke::new(2.2, color));
+    }
+}
+
+/// Paint a clean vector interlocking chain links icon.
+pub fn paint_link_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let c = rect.center();
+    let stroke = Stroke::new(1.3, color);
+    let dir = vec2(0.7071, -0.7071);
+    let perp = vec2(0.7071, 0.7071);
+
+    // Link 1 (bottom-left)
+    let c1 = c - dir * 2.8;
+    let r1 = 3.2;
+    painter.line_segment([c1 - perp * r1 - dir * 1.5, c1 + perp * r1 - dir * 1.5], stroke);
+    painter.line_segment([c1 - perp * r1 - dir * 1.5, c1 - perp * r1 + dir * 1.5], stroke);
+    painter.line_segment([c1 + perp * r1 - dir * 1.5, c1 + perp * r1 + dir * 1.5], stroke);
+
+    // Connecting diagonal bar
+    painter.line_segment([c - dir * 1.8, c + dir * 1.8], Stroke::new(1.5, color));
+
+    // Link 2 (top-right)
+    let c2 = c + dir * 2.8;
+    painter.line_segment([c2 - perp * r1 + dir * 1.5, c2 + perp * r1 + dir * 1.5], stroke);
+    painter.line_segment([c2 - perp * r1 - dir * 1.5, c2 - perp * r1 + dir * 1.5], stroke);
+    painter.line_segment([c2 + perp * r1 - dir * 1.5, c2 + perp * r1 + dir * 1.5], stroke);
+}
+
+/// Paint a clean vector visibility eye icon.
+pub fn paint_eye_icon(painter: &egui::Painter, rect: Rect, color: Color32, visible: bool) {
+    let c = rect.center();
+    let stroke = Stroke::new(1.3, color);
+    let hw = 6.0;
+    let hh = 3.5;
+    let p_left = pos2(c.x - hw, c.y);
+    let p_right = pos2(c.x + hw, c.y);
+    let p_top = pos2(c.x, c.y - hh);
+    let p_bot = pos2(c.x, c.y + hh);
+    painter.line_segment([p_left, p_top], stroke);
+    painter.line_segment([p_top, p_right], stroke);
+    painter.line_segment([p_right, p_bot], stroke);
+    painter.line_segment([p_bot, p_left], stroke);
+    if visible {
+        painter.circle_filled(c, 2.0, color);
+    } else {
+        painter.line_segment([pos2(c.x - hw - 1.0, c.y + hh + 1.0), pos2(c.x + hw + 1.0, c.y - hh - 1.0)], Stroke::new(1.4, color));
+    }
+}
+
+/// Paint a clean vector padlock icon.
+pub fn paint_lock_icon(painter: &egui::Painter, rect: Rect, color: Color32, locked: bool) {
+    let c = rect.center();
+    let stroke = Stroke::new(1.3, color);
+    let body = Rect::from_center_size(pos2(c.x, c.y + 2.0), vec2(10.0, 8.0));
+    painter.rect_stroke(body, CornerRadius::same(1), stroke, egui::StrokeKind::Inside);
+    painter.circle_filled(pos2(c.x, c.y + 1.5), 1.0, color);
+    painter.line_segment([pos2(c.x, c.y + 1.5), pos2(c.x, c.y + 3.5)], stroke);
+    let shackle_h = 4.0;
+    let shackle_w = 3.0;
+    if locked {
+        painter.line_segment([pos2(c.x - shackle_w, body.top()), pos2(c.x - shackle_w, body.top() - shackle_h)], stroke);
+        painter.line_segment([pos2(c.x - shackle_w, body.top() - shackle_h), pos2(c.x + shackle_w, body.top() - shackle_h)], stroke);
+        painter.line_segment([pos2(c.x + shackle_w, body.top() - shackle_h), pos2(c.x + shackle_w, body.top())], stroke);
+    } else {
+        painter.line_segment([pos2(c.x - shackle_w, body.top()), pos2(c.x - shackle_w, body.top() - shackle_h - 2.0)], stroke);
+        painter.line_segment([pos2(c.x - shackle_w, body.top() - shackle_h - 2.0), pos2(c.x + shackle_w, body.top() - shackle_h - 2.0)], stroke);
+        painter.line_segment([pos2(c.x + shackle_w, body.top() - shackle_h - 2.0), pos2(c.x + shackle_w, body.top() - 2.0)], stroke);
+    }
 }
 
 /// Actions triggered by the custom title bar window buttons.
@@ -1277,15 +1389,30 @@ pub fn icon_open_external_button(ui: &mut Ui, t: &Tokens) -> Response {
     resp.on_hover_cursor(CursorIcon::PointingHand)
 }
 
+/// Dedicated clickable vector settings gear button.
+pub fn icon_settings_button(ui: &mut Ui, t: &Tokens) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::click());
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        if resp.hovered() {
+            painter.rect_filled(rect, CornerRadius::same(t.radius_sm as u8), t.hover);
+        }
+        let color = if resp.hovered() { t.text } else { t.text_dim };
+        paint_gear_icon(painter, rect, color);
+    }
+    resp.on_hover_cursor(CursorIcon::PointingHand).on_hover_text("Settings & Plugins (Ctrl+,)")
+}
+
 /// Install font fallback stack to prevent missing glyph tofu.
 pub fn install_fonts(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
 
     // Check system fonts for extra fallback symbols/glyphs on NixOS and standard Linux
     let candidate_fonts = [
+        "/run/current-system/sw/share/X11/fonts/SymbolsNerdFont-Regular.ttf",
+        "/run/current-system/sw/share/X11/fonts/HackNerdFont-Regular.ttf",
         "/run/current-system/sw/share/X11/fonts/DejaVuSans.ttf",
         "/run/current-system/sw/share/X11/fonts/unifont_upper.otf",
-        "/run/current-system/sw/share/X11/fonts/NotoColorEmoji.ttf",
         "/run/current-system/sw/share/X11/fonts/NotoSansSymbols.ttf",
         "/run/current-system/sw/share/X11/fonts/NotoSansSymbols2-Regular.otf",
         "/run/current-system/sw/share/X11/fonts/unifont.otf",
@@ -1293,6 +1420,12 @@ pub fn install_fonts(ctx: &egui::Context) {
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
         "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansSymbols-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansSymbols-Regular.otf",
+        "/usr/share/fonts/opentype/noto/NotoSansSymbols2-Regular.otf",
+        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
     ];
 
     for (idx, path) in candidate_fonts.iter().enumerate() {
@@ -1405,5 +1538,45 @@ mod tests {
         assert_eq!(split_leading_emoji("🔔 Event"), Some(("🔔", "Event")));
         assert_eq!(split_leading_emoji("No emoji"), None);
         assert_eq!(split_leading_emoji(""), None);
+    }
+
+    #[test]
+    fn test_font_glyphs() {
+        let ctx = egui::Context::default();
+        install_fonts(&ctx);
+        let mut missing = Vec::new();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            for entry in walkdir::WalkDir::new("src") {
+                if let Ok(entry) = entry {
+                    if entry.path().extension().map_or(false, |ext| ext == "rs") {
+                        if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                            for (line_idx, line) in content.lines().enumerate() {
+                                if line.trim().starts_with("//") {
+                                    continue;
+                                }
+                                for c in line.chars() {
+                                    if !c.is_ascii() && c != '\u{FE0F}' {
+                                        let s = c.to_string();
+                                        let galley = ctx.fonts_mut(|f| f.layout_no_wrap(s, FontId::proportional(14.0), Color32::WHITE));
+                                        // The tofu rectangle in egui has width 7.0 and height 11.0
+                                        let bounds = galley.mesh_bounds;
+                                        if (bounds.width() - 7.0).abs() < 0.1 && (bounds.height() - 11.0).abs() < 0.1 {
+                                            missing.push((c, entry.path().display().to_string(), line_idx + 1));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        out.textures_delta.clear();
+        missing.sort();
+        missing.dedup_by(|a, b| a.0 == b.0);
+        for (c, file, line) in &missing {
+            println!("MISSING CHARACTER: '{c}' (U+{:04X}) in {file}:{line}", *c as u32);
+        }
+        assert!(missing.is_empty(), "Found {} missing characters: {:?}", missing.len(), missing);
     }
 }
