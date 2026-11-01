@@ -53,6 +53,13 @@ pub enum EraserMode {
     Segment,
 }
 
+/// Action performed when the stylus barrel / secondary button is held.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StylusButtonAction {
+    QuickEraser,
+    QuickLasso,
+}
+
 /// Shape kind selected in the shape tool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShapeToolKind {
@@ -106,6 +113,11 @@ pub struct DrawingPlugin {
 
     pub text_font_size: f32,
     pub text_color: RgbaColor,
+
+    // Wacom / Stylus hardware pressure and dynamics
+    pub stylus_pressure: Option<f32>,
+    pub stylus_barrel_action: StylusButtonAction,
+    last_point_time: Option<Instant>,
 
     // In-progress stroke
     current_stroke_points: Vec<StrokePoint>,
@@ -194,6 +206,10 @@ impl DrawingPlugin {
             text_font_size: 16.0,
             text_color: RgbaColor::BLACK,
 
+            stylus_pressure: None,
+            stylus_barrel_action: StylusButtonAction::QuickEraser,
+            last_point_time: None,
+
             current_stroke_points: Vec::new(),
             stroke_start_time: None,
             last_point_pos: None,
@@ -227,6 +243,119 @@ impl DrawingPlugin {
             import_pdf_path: String::new(),
             import_pdf_append_to_current: false,
             pdf_texture_cache: HashMap::new(),
+        }
+    }
+
+    /// Calculate effective stroke pressure from hardware stylus force, velocity fallback, and pen type.
+    pub fn compute_pressure(
+        &self,
+        hardware_force: Option<f32>,
+        speed_px_per_ms: Option<f32>,
+        tool: ActiveTool,
+        pen_type: PenType,
+    ) -> f32 {
+        let normalized = match hardware_force {
+            Some(f) => f.clamp(0.0, 1.0),
+            None => {
+                // Fallback to speed-based dynamic pressure for mouse/trackpad
+                if let Some(speed) = speed_px_per_ms {
+                    (1.15 - (speed / 2.5) * 0.55).clamp(0.25, 1.0)
+                } else {
+                    1.0
+                }
+            }
+        };
+
+        match tool {
+            ActiveTool::Highlighter => {
+                // Highlighters have mostly uniform flow with subtle touch response
+                (0.92 + 0.16 * normalized).clamp(0.1, 2.0)
+            }
+            ActiveTool::Pen => match pen_type {
+                PenType::Ballpoint => {
+                    // Firm, consistent line with subtle pressure variation (0.80..=1.20)
+                    (0.80 + 0.40 * normalized).clamp(0.1, 2.0)
+                }
+                PenType::Fountain => {
+                    // Responsive calligraphy nib: delicate at light touch, rich at full press (0.35..=1.65)
+                    (0.35 + 1.30 * normalized.powf(1.2)).clamp(0.1, 2.0)
+                }
+                PenType::Brush => {
+                    // Broad dynamic range from fine hairline to broad stroke (0.15..=1.85)
+                    (0.15 + 1.70 * normalized).clamp(0.05, 2.0)
+                }
+            },
+            _ => 1.0,
+        }
+    }
+
+    /// Erase vector elements at the specified page position using current eraser settings.
+    pub fn erase_at_point(&mut self, page_idx: usize, erase_center: Pos2) {
+        let page = match self.doc.pages.get_mut(page_idx) {
+            Some(p) => p,
+            None => return,
+        };
+
+        let erase_radius = self.eraser_size;
+        let highlight_only = self.erase_highlight_only;
+
+        if let Some(layer) = page.active_layer_mut() {
+            if !layer.locked {
+                // 1. Erase strokes
+                match self.eraser_mode {
+                    EraserMode::WholeStroke => {
+                        let prev_len = layer.strokes.len();
+                        layer.strokes.retain(|s| {
+                            if highlight_only && s.tool != StrokeToolKind::Highlighter {
+                                return true;
+                            }
+                            !s.points.iter().any(|pt| {
+                                let dx = pt.x - erase_center.x;
+                                let dy = pt.y - erase_center.y;
+                                (dx * dx + dy * dy).sqrt() <= erase_radius
+                            })
+                        });
+                        if layer.strokes.len() != prev_len {
+                            self.dirty = true;
+                        }
+                    }
+                    EraserMode::Segment => {
+                        for s in &mut layer.strokes {
+                            if highlight_only && s.tool != StrokeToolKind::Highlighter {
+                                continue;
+                            }
+                            s.points.retain(|pt| {
+                                let dx = pt.x - erase_center.x;
+                                let dy = pt.y - erase_center.y;
+                                (dx * dx + dy * dy).sqrt() > erase_radius
+                            });
+                        }
+                        layer.strokes.retain(|s| s.points.len() >= 2);
+                        self.dirty = true;
+                    }
+                }
+
+                // 2. Erase tapes if enabled
+                if self.erase_tapes {
+                    let prev_tapes = layer.tapes.len();
+                    layer.tapes.retain(|t| !t.contains_point(erase_center.x, erase_center.y));
+                    if layer.tapes.len() != prev_tapes {
+                        self.dirty = true;
+                    }
+                }
+
+                // 3. Erase shapes if enabled
+                if self.erase_shapes {
+                    let prev_shapes = layer.shapes.len();
+                    layer.shapes.retain(|sh| {
+                        let b = sh.bounds();
+                        !(erase_center.x >= b[0] && erase_center.x <= b[2] && erase_center.y >= b[1] && erase_center.y <= b[3])
+                    });
+                    if layer.shapes.len() != prev_shapes {
+                        self.dirty = true;
+                    }
+                }
+            }
         }
     }
 
@@ -726,9 +855,33 @@ impl DrawingPlugin {
                             ui.label(RichText::new("Size:").size(11.0).color(t.text_dim));
                             ui.add(egui::Slider::new(&mut self.pen_width, 1.0..=12.0).text("pt").show_value(false));
 
+                            ui.separator();
+                            let pen_types = [
+                                (PenType::Fountain, "✒ Fountain", "Expressive calligraphy nib with dynamic pressure"),
+                                (PenType::Ballpoint, "🖊 Ballpoint", "Uniform, firm ink line with subtle pressure"),
+                                (PenType::Brush, "🖌 Brush", "Broad dynamic range from fine hair to rich stroke"),
+                            ];
+                            for (pt, name, desc) in pen_types {
+                                let is_active = self.pen_type == pt;
+                                let btn = ui.add(
+                                    egui::Button::new(RichText::new(name).size(11.0).color(if is_active { t.accent_text } else { t.text }))
+                                        .fill(if is_active { t.accent } else { Color32::TRANSPARENT })
+                                        .stroke(if is_active { Stroke::NONE } else { Stroke::new(1.0, t.separator) })
+                                        .corner_radius(CornerRadius::same(t.radius_sm as u8)),
+                                );
+                                if btn.on_hover_text(desc).clicked() {
+                                    self.pen_type = pt;
+                                }
+                            }
+
+                            ui.separator();
                             let auto_label = if self.pen_auto_shape { "⚡ Auto-Shape: On" } else { "Auto-Shape: Off" };
                             if ui.add(egui::Button::new(RichText::new(auto_label).size(11.0))).clicked() {
                                 self.pen_auto_shape = !self.pen_auto_shape;
+                            }
+
+                            if self.stylus_pressure.is_some() {
+                                ui.label(RichText::new("✍ Stylus Active").size(11.0).color(t.accent).strong());
                             }
                         }
                         ActiveTool::Highlighter => {
@@ -896,6 +1049,23 @@ impl DrawingPlugin {
     fn render_canvas_area(&mut self, ui: &mut Ui, t: &Tokens, ctx: &mut PluginContext) {
         let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
         let painter = ui.painter_at(rect);
+
+        // Capture Wacom tablet stylus pressure and touch contacts from raw events
+        let raw_events = ui.input(|i| i.raw.events.clone());
+        for event in &raw_events {
+            if let egui::Event::Touch { force, phase, .. } = event {
+                match phase {
+                    egui::TouchPhase::Start | egui::TouchPhase::Move => {
+                        if let Some(f) = force {
+                            self.stylus_pressure = Some(*f);
+                        }
+                    }
+                    egui::TouchPhase::End | egui::TouchPhase::Cancel => {
+                        self.stylus_pressure = None;
+                    }
+                }
+            }
+        }
 
         // Fill background behind paper
         painter.rect_filled(rect, CornerRadius::ZERO, if self.night_mode { Color32::from_rgb(14, 14, 16) } else { t.canvas });
@@ -1153,158 +1323,142 @@ impl DrawingPlugin {
                 let page_pos = to_page(ptr_pos);
                 let inside_page = page_rect.contains(ptr_pos);
 
-                // Handle Active Tool
-                match self.active_tool {
-                    ActiveTool::Hand => {
-                        if response.dragged_by(PointerButton::Primary) || response.dragged_by(PointerButton::Middle) {
-                            self.pan += response.drag_delta();
-                        }
-                    }
-                ActiveTool::Pen | ActiveTool::Highlighter => {
-                    if response.drag_started() && inside_page {
-                        self.current_stroke_points.clear();
-                        self.stroke_start_time = Some(Instant::now());
-                        self.hold_start = Some(Instant::now());
-                        self.last_point_pos = Some(ptr_pos);
-                        self.current_stroke_points.push(StrokePoint::new(page_pos.x, page_pos.y, 1.0, 0));
-                    } else if response.dragged() && self.stroke_start_time.is_some() {
-                        let ms = self.stroke_start_time.unwrap().elapsed().as_millis() as u64;
+                let secondary_held = pointer.button_down(PointerButton::Secondary);
+                let secondary_action = response.dragged_by(PointerButton::Secondary)
+                    || response.clicked_by(PointerButton::Secondary)
+                    || (response.dragged() && secondary_held);
 
-                        // Check hold duration for auto-shape
-                        if let Some(last_pos) = self.last_point_pos {
-                            let dist = (ptr_pos - last_pos).length();
-                            if dist < 4.0 {
-                                // Stationary hold detected
-                            } else {
+                // Quick Stylus Barrel Button Action (e.g., Quick Eraser while holding button)
+                if secondary_action && inside_page {
+                    match self.stylus_barrel_action {
+                        StylusButtonAction::QuickEraser => {
+                            self.current_stroke_points.clear();
+                            self.stroke_start_time = None;
+                            self.hold_start = None;
+                            self.last_point_pos = None;
+                            self.last_point_time = None;
+                            self.erase_at_point(self.active_page_idx, page_pos);
+                        }
+                        StylusButtonAction::QuickLasso => {}
+                    }
+                } else {
+                    // Handle Active Tool
+                    match self.active_tool {
+                        ActiveTool::Hand => {
+                            if response.dragged_by(PointerButton::Primary) || response.dragged_by(PointerButton::Middle) {
+                                self.pan += response.drag_delta();
+                            }
+                        }
+                        ActiveTool::Pen | ActiveTool::Highlighter => {
+                            if response.drag_started() && inside_page {
+                                self.current_stroke_points.clear();
+                                self.stroke_start_time = Some(Instant::now());
                                 self.hold_start = Some(Instant::now());
                                 self.last_point_pos = Some(ptr_pos);
-                            }
-                        }
+                                self.last_point_time = Some(Instant::now());
 
-                        // Straight line highlighter constraint
-                        let point_to_add = if self.active_tool == ActiveTool::Highlighter && self.highlighter_straight {
-                            if let Some(first) = self.current_stroke_points.first() {
-                                StrokePoint::new(page_pos.x, first.y, 1.0, ms)
-                            } else {
-                                StrokePoint::new(page_pos.x, page_pos.y, 1.0, ms)
-                            }
-                        } else {
-                            StrokePoint::new(page_pos.x, page_pos.y, 1.0, ms)
-                        };
+                                let initial_pressure = self.compute_pressure(
+                                    self.stylus_pressure,
+                                    None,
+                                    self.active_tool,
+                                    self.pen_type,
+                                );
+                                self.current_stroke_points.push(StrokePoint::new(page_pos.x, page_pos.y, initial_pressure, 0));
+                            } else if response.dragged() && self.stroke_start_time.is_some() {
+                                let now = Instant::now();
+                                let ms = self.stroke_start_time.unwrap().elapsed().as_millis() as u64;
 
-                        self.current_stroke_points.push(point_to_add);
-                    } else if response.drag_stopped() && !self.current_stroke_points.is_empty() {
-                        // Commit stroke or auto-shape
-                        let hold_ms = self.hold_start.map(|h| h.elapsed().as_millis()).unwrap_or(0);
-                        let auto_shape_triggered = self.pen_auto_shape
-                            && self.active_tool == ActiveTool::Pen
-                            && hold_ms > 350;
+                                let dt_ms = self.last_point_time
+                                    .map(|t| (now - t).as_millis() as f32)
+                                    .unwrap_or(16.0)
+                                    .max(1.0);
 
-                        let mut shape_added = false;
-                        if auto_shape_triggered {
-                            if let Some(shape) = recognize_stroke_shape(&self.current_stroke_points, self.pen_color, self.pen_width) {
-                                if let Some(layer) = page.active_layer_mut() {
-                                    if !layer.locked {
-                                        layer.shapes.push(shape);
-                                        self.dirty = true;
-                                        shape_added = true;
+                                let mut dist = 0.0;
+                                if let Some(last_pos) = self.last_point_pos {
+                                    dist = (ptr_pos - last_pos).length();
+                                    if dist < 4.0 {
+                                        // Stationary hold detected
+                                    } else {
+                                        self.hold_start = Some(now);
                                     }
                                 }
-                            }
-                        }
 
-                        if !shape_added {
-                            let is_hl = self.active_tool == ActiveTool::Highlighter;
-                            let stroke = VectorStroke {
-                                id: format!("stroke_{:x}", Instant::now().elapsed().as_nanos()),
-                                tool: if is_hl { StrokeToolKind::Highlighter } else { StrokeToolKind::Pen },
-                                pen_type: self.pen_type,
-                                points: std::mem::take(&mut self.current_stroke_points),
-                                color: if is_hl { self.highlighter_color } else { self.pen_color },
-                                base_width: if is_hl { self.highlighter_width } else { self.pen_width },
-                                is_straight: is_hl && self.highlighter_straight,
-                            };
-                            if let Some(layer) = page.active_layer_mut() {
-                                if !layer.locked {
-                                    layer.strokes.push(stroke);
-                                    self.dirty = true;
+                                if dist >= 1.5 || self.current_stroke_points.is_empty() {
+                                    self.last_point_pos = Some(ptr_pos);
+                                    self.last_point_time = Some(now);
+
+                                    let speed = dist / dt_ms;
+                                    let pressure = self.compute_pressure(
+                                        self.stylus_pressure,
+                                        Some(speed),
+                                        self.active_tool,
+                                        self.pen_type,
+                                    );
+
+                                    // Straight line highlighter constraint
+                                    let point_to_add = if self.active_tool == ActiveTool::Highlighter && self.highlighter_straight {
+                                        if let Some(first) = self.current_stroke_points.first() {
+                                            StrokePoint::new(page_pos.x, first.y, pressure, ms)
+                                        } else {
+                                            StrokePoint::new(page_pos.x, page_pos.y, pressure, ms)
+                                        }
+                                    } else {
+                                        StrokePoint::new(page_pos.x, page_pos.y, pressure, ms)
+                                    };
+
+                                    self.current_stroke_points.push(point_to_add);
                                 }
-                            }
-                        }
+                            } else if response.drag_stopped() && !self.current_stroke_points.is_empty() {
+                                // Commit stroke or auto-shape
+                                let hold_ms = self.hold_start.map(|h| h.elapsed().as_millis()).unwrap_or(0);
+                                let auto_shape_triggered = self.pen_auto_shape
+                                    && self.active_tool == ActiveTool::Pen
+                                    && hold_ms > 350;
 
-                        self.current_stroke_points.clear();
-                        self.stroke_start_time = None;
-                        self.hold_start = None;
-                    }
-                }
-                ActiveTool::Eraser => {
-                    if response.dragged() || response.clicked() {
-                        let erase_radius = self.eraser_size;
-                        let erase_center = page_pos;
-
-                        if let Some(layer) = page.active_layer_mut() {
-                            if !layer.locked {
-                                // 1. Erase strokes
-                                let highlight_only = self.erase_highlight_only;
-                                match self.eraser_mode {
-                                    EraserMode::WholeStroke => {
-                                        let prev_len = layer.strokes.len();
-                                        layer.strokes.retain(|s| {
-                                            if highlight_only && s.tool != StrokeToolKind::Highlighter {
-                                                return true;
+                                let mut shape_added = false;
+                                if auto_shape_triggered {
+                                    if let Some(shape) = recognize_stroke_shape(&self.current_stroke_points, self.pen_color, self.pen_width) {
+                                        if let Some(layer) = page.active_layer_mut() {
+                                            if !layer.locked {
+                                                layer.shapes.push(shape);
+                                                self.dirty = true;
+                                                shape_added = true;
                                             }
-                                            // Check if stroke points intersect erase circle
-                                            !s.points.iter().any(|pt| {
-                                                let dx = pt.x - erase_center.x;
-                                                let dy = pt.y - erase_center.y;
-                                                (dx * dx + dy * dy).sqrt() <= erase_radius
-                                            })
-                                        });
-                                        if layer.strokes.len() != prev_len {
+                                        }
+                                    }
+                                }
+
+                                if !shape_added {
+                                    let is_hl = self.active_tool == ActiveTool::Highlighter;
+                                    let stroke = VectorStroke {
+                                        id: format!("stroke_{:x}", Instant::now().elapsed().as_nanos()),
+                                        tool: if is_hl { StrokeToolKind::Highlighter } else { StrokeToolKind::Pen },
+                                        pen_type: self.pen_type,
+                                        points: std::mem::take(&mut self.current_stroke_points),
+                                        color: if is_hl { self.highlighter_color } else { self.pen_color },
+                                        base_width: if is_hl { self.highlighter_width } else { self.pen_width },
+                                        is_straight: is_hl && self.highlighter_straight,
+                                    };
+                                    if let Some(layer) = page.active_layer_mut() {
+                                        if !layer.locked {
+                                            layer.strokes.push(stroke);
                                             self.dirty = true;
                                         }
                                     }
-                                    EraserMode::Segment => {
-                                        // Erase individual points within radius
-                                        for s in &mut layer.strokes {
-                                            if highlight_only && s.tool != StrokeToolKind::Highlighter {
-                                                continue;
-                                            }
-                                            s.points.retain(|pt| {
-                                                let dx = pt.x - erase_center.x;
-                                                let dy = pt.y - erase_center.y;
-                                                (dx * dx + dy * dy).sqrt() > erase_radius
-                                            });
-                                        }
-                                        layer.strokes.retain(|s| s.points.len() >= 2);
-                                        self.dirty = true;
-                                    }
                                 }
 
-                                // 2. Erase tapes if enabled
-                                if self.erase_tapes {
-                                    let prev_tapes = layer.tapes.len();
-                                    layer.tapes.retain(|t| !t.contains_point(erase_center.x, erase_center.y));
-                                    if layer.tapes.len() != prev_tapes {
-                                        self.dirty = true;
-                                    }
-                                }
-
-                                // 3. Erase shapes if enabled
-                                if self.erase_shapes {
-                                    let prev_shapes = layer.shapes.len();
-                                    layer.shapes.retain(|sh| {
-                                        let b = sh.bounds();
-                                        !(erase_center.x >= b[0] && erase_center.x <= b[2] && erase_center.y >= b[1] && erase_center.y <= b[3])
-                                    });
-                                    if layer.shapes.len() != prev_shapes {
-                                        self.dirty = true;
-                                    }
-                                }
+                                self.current_stroke_points.clear();
+                                self.stroke_start_time = None;
+                                self.hold_start = None;
+                                self.last_point_pos = None;
+                                self.last_point_time = None;
                             }
                         }
-                    }
-                }
+                        ActiveTool::Eraser => {
+                            if (response.dragged() || response.clicked()) && inside_page {
+                                self.erase_at_point(self.active_page_idx, page_pos);
+                            }
+                        }
                 ActiveTool::Tape => {
                     if response.drag_started() && inside_page {
                         self.selection_drag_start = Some(page_pos);
@@ -1390,6 +1544,44 @@ impl DrawingPlugin {
         }
     }
 }
+
+        if response.drag_stopped() {
+            self.stylus_pressure = None;
+            self.last_point_time = None;
+        }
+
+        // 7. Stylus / Pointer Hover Feedback (Eraser outline & Pen tip preview)
+        if response.hovered() && !is_panning_shortcut {
+            if let Some(hover_pos) = response.hover_pos() {
+                let is_quick_erasing = pointer.button_down(PointerButton::Secondary)
+                    && self.stylus_barrel_action == StylusButtonAction::QuickEraser;
+
+                if self.active_tool == ActiveTool::Eraser || is_quick_erasing {
+                    let radius = self.eraser_size * self.zoom;
+                    painter.circle_stroke(
+                        hover_pos,
+                        radius,
+                        Stroke::new(1.5, Color32::from_rgba_unmultiplied(239, 68, 68, 180)),
+                    );
+                } else if self.active_tool == ActiveTool::Pen || self.active_tool == ActiveTool::Highlighter {
+                    let base_w = if self.active_tool == ActiveTool::Highlighter {
+                        self.highlighter_width
+                    } else {
+                        self.pen_width
+                    };
+                    let cur_p = self.stylus_pressure.unwrap_or(1.0);
+                    let tip_radius = (base_w * 0.5 * cur_p * self.zoom).max(1.5);
+                    let tip_color = if self.active_tool == ActiveTool::Highlighter {
+                        Color32::from_rgba_unmultiplied(250, 204, 21, 140)
+                    } else {
+                        let c = self.pen_color;
+                        Color32::from_rgba_unmultiplied(c.r, c.g, c.b, 160)
+                    };
+                    painter.circle_stroke(hover_pos, tip_radius, Stroke::new(1.0, tip_color));
+                }
+            }
+        }
+    }
 
     /// Render Paper Template background vector grid/lines
     fn draw_template_background(painter: &egui::Painter, rect: Rect, template: &BackgroundTemplate, zoom: f32, night_mode: bool) {
@@ -1481,7 +1673,8 @@ impl DrawingPlugin {
                     c = RgbaColor::WHITE;
                 }
                 let color = Color32::from_rgba_unmultiplied(c.r, c.g, c.b, ((c.a as f32) * layer_opacity) as u8);
-                painter.circle_filled(sc, (stroke.base_width * 0.5 * zoom).max(1.0), color);
+                let p_factor = p.pressure;
+                painter.circle_filled(sc, (stroke.base_width * 0.5 * p_factor * zoom).max(1.0), color);
             }
             return;
         }
@@ -1492,7 +1685,7 @@ impl DrawingPlugin {
         }
         let color = Color32::from_rgba_unmultiplied(c.r, c.g, c.b, ((c.a as f32) * layer_opacity) as u8);
 
-        // Catmull-Rom spline interpolation for smooth inking
+        // Catmull-Rom spline interpolation for smooth inking with continuous variable pressure
         let pts: Vec<Pos2> = stroke.points.iter().map(|p| to_screen(pos2(p.x, p.y))).collect();
         for i in 0..pts.len() - 1 {
             let p0 = if i > 0 { pts[i - 1] } else { pts[i] };
@@ -1500,10 +1693,10 @@ impl DrawingPlugin {
             let p2 = pts[i + 1];
             let p3 = if i + 2 < pts.len() { pts[i + 2] } else { p2 };
 
-            let pressure = stroke.points[i].pressure;
-            let width = (stroke.base_width * pressure * zoom).max(1.0);
+            let pr1 = stroke.points[i].pressure;
+            let pr2 = stroke.points[i + 1].pressure;
 
-            // Subdivide into 4 segments per point pair
+            // Subdivide into 4 segments per point pair with smoothly interpolated pressure
             let mut prev = p1;
             for step in 1..=4 {
                 let t = step as f32 / 4.0;
@@ -1513,6 +1706,9 @@ impl DrawingPlugin {
                 let x = 0.5 * ((2.0 * p1.x) + (-p0.x + p2.x) * t + (2.0 * p0.x - 5.0 * p1.x + 4.0 * p2.x - p3.x) * t2 + (-p0.x + 3.0 * p1.x - 3.0 * p2.x + p3.x) * t3);
                 let y = 0.5 * ((2.0 * p1.y) + (-p0.y + p2.y) * t + (2.0 * p0.y - 5.0 * p1.y + 4.0 * p2.y - p3.y) * t2 + (-p0.y + 3.0 * p1.y - 3.0 * p2.y + p3.y) * t3);
                 let curr = pos2(x, y);
+
+                let seg_pressure = pr1 + (pr2 - pr1) * t;
+                let width = (stroke.base_width * seg_pressure * zoom).max(1.0);
 
                 painter.line_segment([prev, curr], Stroke::new(width, color));
                 prev = curr;
@@ -2372,6 +2568,117 @@ mod tests {
         assert_eq!(size, [612.0, 792.0]);
 
         let _ = std::fs::remove_file(&temp_pdf);
+    }
+
+    #[test]
+    fn test_wacom_stylus_pressure_curves() {
+        let plugin = DrawingPlugin::new();
+
+        // 1. Brush Pen: High dynamic range (hairline to bold)
+        let brush_light = plugin.compute_pressure(Some(0.0), None, ActiveTool::Pen, PenType::Brush);
+        let brush_med = plugin.compute_pressure(Some(0.5), None, ActiveTool::Pen, PenType::Brush);
+        let brush_heavy = plugin.compute_pressure(Some(1.0), None, ActiveTool::Pen, PenType::Brush);
+        assert!((brush_light - 0.15).abs() < 0.01);
+        assert!((brush_med - 1.0).abs() < 0.01);
+        assert!((brush_heavy - 1.85).abs() < 0.01);
+        assert!(brush_heavy > brush_light * 10.0);
+
+        // 2. Ballpoint: Firm and consistent
+        let ball_light = plugin.compute_pressure(Some(0.0), None, ActiveTool::Pen, PenType::Ballpoint);
+        let ball_heavy = plugin.compute_pressure(Some(1.0), None, ActiveTool::Pen, PenType::Ballpoint);
+        assert!((ball_light - 0.80).abs() < 0.01);
+        assert!((ball_heavy - 1.20).abs() < 0.01);
+
+        // 3. Fountain Pen: Expressive non-linear curve
+        let fountain_light = plugin.compute_pressure(Some(0.1), None, ActiveTool::Pen, PenType::Fountain);
+        let fountain_heavy = plugin.compute_pressure(Some(1.0), None, ActiveTool::Pen, PenType::Fountain);
+        assert!(fountain_light < 0.5);
+        assert!(fountain_heavy > 1.6);
+
+        // 4. Highlighter: Consistent width with subtle variation
+        let hl_light = plugin.compute_pressure(Some(0.0), None, ActiveTool::Highlighter, PenType::Fountain);
+        let hl_heavy = plugin.compute_pressure(Some(1.0), None, ActiveTool::Highlighter, PenType::Fountain);
+        assert!((hl_light - 0.92).abs() < 0.01);
+        assert!((hl_heavy - 1.08).abs() < 0.01);
+
+        // 5. Velocity Fallback (when hardware force is None):
+        // Slow speed (0.1 px/ms) -> full body
+        let slow_p = plugin.compute_pressure(None, Some(0.1), ActiveTool::Pen, PenType::Brush);
+        // Fast whip (2.5 px/ms) -> natural taper
+        let fast_p = plugin.compute_pressure(None, Some(2.5), ActiveTool::Pen, PenType::Brush);
+        assert!(slow_p > fast_p);
+    }
+
+    #[test]
+    fn test_wacom_stylus_barrel_button_quick_erase() {
+        let mut plugin = DrawingPlugin::new();
+        plugin.eraser_size = 20.0;
+        plugin.eraser_mode = EraserMode::WholeStroke;
+
+        // Add two strokes: one at (50, 50), another at (200, 200)
+        let stroke1 = VectorStroke {
+            id: "s1".into(),
+            tool: StrokeToolKind::Pen,
+            pen_type: PenType::Fountain,
+            points: vec![
+                StrokePoint::new(50.0, 50.0, 1.0, 0),
+                StrokePoint::new(55.0, 55.0, 1.0, 10),
+            ],
+            color: RgbaColor::BLACK,
+            base_width: 2.0,
+            is_straight: false,
+        };
+        let stroke2 = VectorStroke {
+            id: "s2".into(),
+            tool: StrokeToolKind::Pen,
+            pen_type: PenType::Fountain,
+            points: vec![
+                StrokePoint::new(200.0, 200.0, 1.0, 0),
+                StrokePoint::new(210.0, 210.0, 1.0, 10),
+            ],
+            color: RgbaColor::BLACK,
+            base_width: 2.0,
+            is_straight: false,
+        };
+
+        plugin.doc.pages[0].layers[0].strokes.push(stroke1);
+        plugin.doc.pages[0].layers[0].strokes.push(stroke2);
+        assert_eq!(plugin.doc.pages[0].layers[0].strokes.len(), 2);
+
+        // Quick erase near s1 (52, 52)
+        plugin.erase_at_point(0, pos2(52.0, 52.0));
+        assert_eq!(plugin.doc.pages[0].layers[0].strokes.len(), 1);
+        assert_eq!(plugin.doc.pages[0].layers[0].strokes[0].id, "s2");
+        assert!(plugin.dirty);
+    }
+
+    #[test]
+    fn test_smooth_stroke_interpolation_with_pressure() {
+        let stroke = VectorStroke {
+            id: "test_stroke".into(),
+            tool: StrokeToolKind::Pen,
+            pen_type: PenType::Brush,
+            points: vec![
+                StrokePoint::new(10.0, 10.0, 0.2, 0),
+                StrokePoint::new(30.0, 40.0, 0.8, 10),
+                StrokePoint::new(60.0, 70.0, 1.5, 20),
+                StrokePoint::new(100.0, 120.0, 0.4, 30),
+            ],
+            color: RgbaColor::BLUE,
+            base_width: 3.0,
+            is_straight: false,
+        };
+
+        let ctx = egui::Context::default();
+        let mut out = ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let (rect, _) = ui.allocate_exact_size(vec2(200.0, 200.0), Sense::hover());
+                let painter = ui.painter_at(rect);
+                // Verify Catmull-Rom stroke with variable pressure draws without issue
+                DrawingPlugin::draw_smooth_stroke(&painter, &stroke, |p| p, 1.0, 1.0, false);
+            });
+        });
+        out.textures_delta.clear();
     }
 }
 
