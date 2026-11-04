@@ -21,6 +21,7 @@ image.workspace = true
 log.workspace = true
 env_logger.workspace = true
 dirs.workspace = true
+arboard.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -19,8 +19,8 @@
 use chrono::NaiveDate;
 use egui::text::LayoutJob;
 use egui::{
-    Color32, CornerRadius, FontId, Frame, Id, Margin, RichText, ScrollArea, Stroke,
-    TextBuffer, TextFormat, Ui,
+    pos2, vec2, Color32, CornerRadius, FontId, Frame, Id, Margin, RichText, ScrollArea, Sense,
+    Stroke, TextBuffer, TextFormat, Ui,
 };
 use mybrain_core::daily::DailyNotes;
 use mybrain_core::events::{Event, EventStore};
@@ -70,6 +70,8 @@ pub struct MarkdownPlugin {
     pub show_rename_dialog: bool,
     pub rename_target: Option<NoteId>,
     pub rename_new_name: String,
+
+    pub clipboard_buffer: Option<String>,
 }
 
 impl MarkdownPlugin {
@@ -96,6 +98,8 @@ impl MarkdownPlugin {
             show_rename_dialog: false,
             rename_target: None,
             rename_new_name: String::new(),
+
+            clipboard_buffer: None,
         }
     }
 
@@ -387,6 +391,101 @@ impl MarkdownPlugin {
                     self.editor_buffer = content;
                     self.editor_dirty = false;
                 }
+            }
+        }
+    }
+
+    pub fn copy_selection(&mut self, ctx: &egui::Context) -> bool {
+        if let Some((start, end)) = self.editor_selection {
+            if start < end
+                && end <= self.editor_buffer.len()
+                && self.editor_buffer.is_char_boundary(start)
+                && self.editor_buffer.is_char_boundary(end)
+            {
+                let text = self.editor_buffer[start..end].to_string();
+                self.clipboard_buffer = Some(text.clone());
+                ctx.copy_text(text.clone());
+                if let Ok(mut cb) = arboard::Clipboard::new() {
+                    let _ = cb.set_text(text);
+                }
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn cut_selection(&mut self, ctx: &egui::Context) -> bool {
+        if let Some((start, end)) = self.editor_selection {
+            if start < end
+                && end <= self.editor_buffer.len()
+                && self.editor_buffer.is_char_boundary(start)
+                && self.editor_buffer.is_char_boundary(end)
+            {
+                let text = self.editor_buffer[start..end].to_string();
+                self.clipboard_buffer = Some(text.clone());
+                ctx.copy_text(text.clone());
+                if let Ok(mut cb) = arboard::Clipboard::new() {
+                    let _ = cb.set_text(text);
+                }
+                self.editor_buffer.replace_range(start..end, "");
+                self.editor_cursor = start;
+                self.editor_selection = None;
+                self.editor_dirty = true;
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn paste_from_clipboard(&mut self) -> bool {
+        let text_to_paste = arboard::Clipboard::new()
+            .ok()
+            .and_then(|mut cb| cb.get_text().ok())
+            .or_else(|| self.clipboard_buffer.clone());
+
+        if let Some(paste_text) = text_to_paste {
+            if !paste_text.is_empty() {
+                if let Some((start, end)) = self.editor_selection {
+                    if start < end
+                        && end <= self.editor_buffer.len()
+                        && self.editor_buffer.is_char_boundary(start)
+                        && self.editor_buffer.is_char_boundary(end)
+                    {
+                        self.editor_buffer.replace_range(start..end, &paste_text);
+                        self.editor_cursor = start + paste_text.len();
+                        self.editor_selection = None;
+                        self.editor_dirty = true;
+                        return true;
+                    }
+                }
+                let cursor = self.editor_cursor.min(self.editor_buffer.len());
+                let cursor = if self.editor_buffer.is_char_boundary(cursor) {
+                    cursor
+                } else {
+                    self.editor_buffer.len()
+                };
+                self.editor_buffer.insert_str(cursor, &paste_text);
+                self.editor_cursor = cursor + paste_text.len();
+                self.editor_selection = None;
+                self.editor_dirty = true;
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn select_all(&mut self, ctx: &egui::Context, text_edit_id: egui::Id) {
+        let len = self.editor_buffer.len();
+        if len > 0 {
+            self.editor_selection = Some((0, len));
+            self.editor_cursor = len;
+            if let Some(mut state) = egui::text_edit::TextEditState::load(ctx, text_edit_id) {
+                let char_count = self.editor_buffer.chars().count();
+                state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                    egui::text::CCursor::new(0),
+                    egui::text::CCursor::new(char_count),
+                )));
+                state.store(ctx, text_edit_id);
             }
         }
     }
@@ -1250,6 +1349,60 @@ impl MarkdownPlugin {
                         self.editor_dirty = true;
                     }
 
+                    // Context Menu (Right Click) with Couper, Copier, Coller, Tout selectionner
+                    let text_edit_id = output.response.id;
+                    output.response.context_menu(|ui| {
+                        ui.set_min_width(185.0);
+
+                        let has_selection = self.editor_selection.is_some();
+                        let clipboard_has_text = arboard::Clipboard::new()
+                            .ok()
+                            .and_then(|mut cb| cb.get_text().ok())
+                            .map(|s| !s.is_empty())
+                            .unwrap_or(self.clipboard_buffer.is_some());
+
+                        // 1. Couper
+                        if theme::context_menu_item(ui, t, theme::paint_cut_icon, "Couper", "Ctrl+X", has_selection).clicked() {
+                            self.cut_selection(ui.ctx());
+                            ui.close();
+                        }
+
+                        // 2. Copier
+                        if theme::context_menu_item(ui, t, theme::paint_copy_icon, "Copier", "Ctrl+C", has_selection).clicked() {
+                            self.copy_selection(ui.ctx());
+                            ui.close();
+                        }
+
+                        // 3. Coller
+                        if theme::context_menu_item(ui, t, theme::paint_paste_icon, "Coller", "Ctrl+V", clipboard_has_text).clicked() {
+                            self.paste_from_clipboard();
+                            ui.close();
+                        }
+
+                        ui.separator();
+
+                        // 4. Tout selectionner
+                        let has_content = !self.editor_buffer.is_empty();
+                        if theme::context_menu_item(ui, t, theme::paint_select_all_icon, "Tout selectionner", "Ctrl+A", has_content).clicked() {
+                            self.select_all(ui.ctx(), text_edit_id);
+                            ui.close();
+                        }
+                    });
+
+                    // Keyboard shortcuts handling
+                    if output.response.has_focus() {
+                        let is_cmd = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
+                        if is_cmd && ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::C)) {
+                            self.copy_selection(ui.ctx());
+                        } else if is_cmd && ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::X)) {
+                            self.cut_selection(ui.ctx());
+                        } else if is_cmd && ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::V)) {
+                            self.paste_from_clipboard();
+                        } else if is_cmd && ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::A)) {
+                            self.select_all(ui.ctx(), text_edit_id);
+                        }
+                    }
+
                     // Wiki-link autocomplete popup when typing `[[`
                     render_link_autocomplete(ui, self, ctx, &output, t);
 
@@ -1371,28 +1524,38 @@ impl MarkdownPlugin {
                                     ui.horizontal_top(|ui| {
                                         ui.set_max_width(ui.available_width());
                                         if indent > 0 {
-                                            ui.add_space(indent as f32 * 18.0);
+                                            ui.add_space(indent as f32 * 20.0);
                                         }
-                                        let is_task_checked = match marker {
+                                        let is_task_checked = match &marker {
                                             ListMarker::Bullet => {
-                                                ui.label(RichText::new("•").color(t.accent_text).size(13.0));
+                                                let (marker_rect, _) = ui.allocate_exact_size(vec2(16.0, 18.0), Sense::hover());
+                                                let center = pos2(marker_rect.center().x, marker_rect.top() + 9.5);
+                                                ui.painter().circle_filled(center, 2.8, t.accent);
                                                 false
                                             }
                                             ListMarker::Ordered(n) => {
-                                                ui.label(RichText::new(format!("{n}.")).color(t.text_dim).size(12.0));
+                                                ui.allocate_ui_with_layout(vec2(22.0, 18.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                    ui.label(RichText::new(format!("{n}.")).color(t.text_dim).size(12.0).strong());
+                                                });
+                                                ui.add_space(4.0);
                                                 false
                                             }
                                             ListMarker::Task { checked } => {
-                                                let mut is_checked = checked;
+                                                let mut is_checked = *checked;
                                                 if ui.checkbox(&mut is_checked, "").changed() {
                                                     task_to_toggle = Some(line_no);
                                                 }
-                                                checked
+                                                ui.add_space(2.0);
+                                                *checked
                                             }
                                         };
-                                        render_inline_spans(ui, text, &mut note_to_open, is_task_checked, ctx.vault, t);
+                                        let text_width = ui.available_width();
+                                        ui.allocate_ui_with_layout(vec2(text_width, 18.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                                            ui.set_max_width(text_width);
+                                            render_inline_spans(ui, text, &mut note_to_open, is_task_checked, ctx.vault, t);
+                                        });
                                     });
-                                    ui.add_space(2.0);
+                                    ui.add_space(3.0);
                                 }
                                 Block::Quote(text) => {
                                     render_quote_or_callout(ui, &text, &mut note_to_open, ctx.vault, t);
@@ -1806,6 +1969,50 @@ fn field_frame(t: &Tokens) -> Frame {
         .inner_margin(Margin::symmetric(10, 6))
 }
 
+fn highlight_inline_links_and_tags(
+    line: &str,
+    job: &mut LayoutJob,
+    default_font: &FontId,
+    t: &Tokens,
+) {
+    let mut last = 0;
+    for link in mybrain_core::links::parse_links(line) {
+        if link.range.start > last {
+            job.append(
+                &line[last..link.range.start],
+                0.0,
+                TextFormat {
+                    font_id: default_font.clone(),
+                    color: t.text,
+                    ..Default::default()
+                },
+            );
+        }
+        job.append(
+            &line[link.range.clone()],
+            0.0,
+            TextFormat {
+                font_id: default_font.clone(),
+                color: t.accent_text,
+                underline: Stroke::new(1.0, t.accent_border),
+                ..Default::default()
+            },
+        );
+        last = link.range.end;
+    }
+    if last < line.len() {
+        job.append(
+            &line[last..],
+            0.0,
+            TextFormat {
+                font_id: default_font.clone(),
+                color: t.text,
+                ..Default::default()
+            },
+        );
+    }
+}
+
 fn highlight_markdown(text: &str, t: &Tokens, font_size: f32) -> LayoutJob {
     let mut job = LayoutJob::default();
     let default_font = FontId::monospace(font_size);
@@ -1813,6 +2020,9 @@ fn highlight_markdown(text: &str, t: &Tokens, font_size: f32) -> LayoutJob {
 
     for line in text.split_inclusive('\n') {
         let trimmed = line.trim_start();
+        let leading_len = line.len() - trimmed.len();
+        let leading = &line[..leading_len];
+
         if trimmed.starts_with('#') {
             job.append(
                 line,
@@ -1843,36 +2053,22 @@ fn highlight_markdown(text: &str, t: &Tokens, font_size: f32) -> LayoutJob {
                     ..Default::default()
                 },
             );
-        } else {
-            // Highlight [[wiki links]] and tags within the line
-            let mut last = 0;
-            for link in mybrain_core::links::parse_links(line) {
-                if link.range.start > last {
-                    job.append(
-                        &line[last..link.range.start],
-                        0.0,
-                        TextFormat {
-                            font_id: default_font.clone(),
-                            color: t.text,
-                            ..Default::default()
-                        },
-                    );
-                }
+        } else if trimmed.starts_with("- ")
+            || trimmed.starts_with("-\t")
+            || trimmed.starts_with("* ")
+            || trimmed.starts_with("*\t")
+            || trimmed.starts_with("+ ")
+            || trimmed.starts_with("+\t")
+            || trimmed == "-\n"
+            || trimmed == "-"
+            || trimmed == "*\n"
+            || trimmed == "*"
+            || trimmed == "+\n"
+            || trimmed == "+"
+        {
+            if leading_len > 0 {
                 job.append(
-                    &line[link.range.clone()],
-                    0.0,
-                    TextFormat {
-                        font_id: default_font.clone(),
-                        color: t.accent_text,
-                        underline: Stroke::new(1.0, t.accent_border),
-                        ..Default::default()
-                    },
-                );
-                last = link.range.end;
-            }
-            if last < line.len() {
-                job.append(
-                    &line[last..],
+                    leading,
                     0.0,
                     TextFormat {
                         font_id: default_font.clone(),
@@ -1881,6 +2077,53 @@ fn highlight_markdown(text: &str, t: &Tokens, font_size: f32) -> LayoutJob {
                     },
                 );
             }
+            let marker_len = if trimmed.len() >= 2 && (trimmed.as_bytes()[1] == b' ' || trimmed.as_bytes()[1] == b'\t') {
+                2
+            } else {
+                1
+            };
+            let marker = &trimmed[..marker_len];
+            let after_marker = &trimmed[marker_len..];
+
+            job.append(
+                marker,
+                0.0,
+                TextFormat {
+                    font_id: default_font.clone(),
+                    color: t.accent,
+                    ..Default::default()
+                },
+            );
+
+            let rest_line = if let Some(rest_task) = after_marker.strip_prefix("[ ] ") {
+                job.append(
+                    "[ ] ",
+                    0.0,
+                    TextFormat {
+                        font_id: default_font.clone(),
+                        color: t.text_dim,
+                        ..Default::default()
+                    },
+                );
+                rest_task
+            } else if let Some(rest_task) = after_marker.strip_prefix("[x] ").or_else(|| after_marker.strip_prefix("[X] ")) {
+                job.append(
+                    &after_marker[..4],
+                    0.0,
+                    TextFormat {
+                        font_id: default_font.clone(),
+                        color: t.success,
+                        ..Default::default()
+                    },
+                );
+                rest_task
+            } else {
+                after_marker
+            };
+
+            highlight_inline_links_and_tags(rest_line, &mut job, &default_font, t);
+        } else {
+            highlight_inline_links_and_tags(line, &mut job, &default_font, t);
         }
     }
     job
@@ -2486,9 +2729,85 @@ mod tests {
     #[test]
     fn test_markdown_syntax_highlighting_job() {
         let t = Tokens::for_kind(crate::theme::ThemeKind::default());
-        let markdown = "# Title\n\n```rust\nlet x = 42;\n```\n\n> [!NOTE]\n> A callout\n\nSee [[OtherNote]] here\n";
+        let markdown = "# Title\n\n```rust\nlet x = 42;\n```\n\n> [!NOTE]\n> A callout\n\n- item 1\n  - [ ] task\n- [x] done\n\nSee [[OtherNote]] here\n";
         let job = highlight_markdown(markdown, &t, 13.0);
         assert!(!job.text.is_empty());
         assert_eq!(job.text, markdown);
+    }
+
+    #[test]
+    fn test_copy_cut_paste_and_select_all() {
+        let ctx = egui::Context::default();
+        let mut plugin = MarkdownPlugin::new();
+        plugin.active_note = Some(NoteId::new("Test").unwrap());
+        plugin.editor_buffer = "The quick brown fox".to_string();
+
+        // 1. Copy selection
+        plugin.editor_selection = Some((4, 9)); // "quick"
+        assert!(plugin.copy_selection(&ctx));
+
+        // 2. Cut selection
+        assert!(plugin.cut_selection(&ctx));
+        assert_eq!(plugin.editor_buffer, "The  brown fox");
+        assert_eq!(plugin.editor_selection, None);
+        assert_eq!(plugin.editor_cursor, 4);
+
+        // 3. Paste
+        assert!(plugin.paste_from_clipboard());
+        assert_eq!(plugin.editor_buffer, "The quick brown fox");
+        assert_eq!(plugin.editor_cursor, 9);
+
+        // 4. Select all
+        let dummy_id = Id::NULL.with("dummy_editor");
+        plugin.select_all(&ctx, dummy_id);
+        assert_eq!(plugin.editor_selection, Some((0, 19)));
+        assert_eq!(plugin.editor_cursor, 19);
+    }
+
+    #[test]
+    fn test_context_menu_rendering_with_icons() {
+        let t = Tokens::for_kind(crate::theme::ThemeKind::default());
+        let ctx = egui::Context::default();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                // Test all 4 context menu items render with vector icons
+                let _r1 = theme::context_menu_item(ui, &t, theme::paint_cut_icon, "Couper", "Ctrl+X", true);
+                let _r2 = theme::context_menu_item(ui, &t, theme::paint_copy_icon, "Copier", "Ctrl+C", true);
+                let _r3 = theme::context_menu_item(ui, &t, theme::paint_paste_icon, "Coller", "Ctrl+V", true);
+                let _r4 = theme::context_menu_item(ui, &t, theme::paint_select_all_icon, "Tout selectionner", "Ctrl+A", true);
+            });
+        });
+        out.textures_delta.clear();
+    }
+
+    #[test]
+    fn test_inspect_list_rendering() {
+        let t = Tokens::for_kind(crate::theme::ThemeKind::default());
+        let ctx = egui::Context::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = Vault::open(tmp.path()).unwrap();
+        let mut note_to_open = None;
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let p_resp = ui.scope(|ui| {
+                    render_inline_spans(ui, "Defis :", &mut note_to_open, false, &vault, &t);
+                });
+                println!("Paragraph scope rect: {:?}", p_resp.response.rect);
+
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    let (marker_rect, _) = ui.allocate_exact_size(vec2(12.0, 20.0), Sense::hover());
+                    let center = pos2(marker_rect.left() + 5.0, marker_rect.top() + 11.5);
+                    println!("marker_rect: {:?}, center: {:?}", marker_rect, center);
+
+                    let text_width = ui.available_width();
+                    let t_resp = ui.allocate_ui_with_layout(vec2(text_width, 20.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                        render_inline_spans(ui, "Parle fort", &mut note_to_open, false, &vault, &t);
+                    });
+                    println!("allocate_ui_with_layout rect: {:?}", t_resp.response.rect);
+                });
+            });
+        });
+        out.textures_delta.clear();
     }
 }

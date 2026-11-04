@@ -1433,6 +1433,7 @@ dependencies = [
 name = "mybrain-app"
 version = "0.2.0"
 dependencies = [
+ "arboard",
  "chrono",
  "dirs",
  "eframe",

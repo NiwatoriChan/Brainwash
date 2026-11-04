@@ -1403,6 +1403,143 @@ pub fn icon_settings_button(ui: &mut Ui, t: &Tokens) -> Response {
     resp.on_hover_cursor(CursorIcon::PointingHand).on_hover_text("Settings & Plugins (Ctrl+,)")
 }
 
+/// Paint clean vector scissors for Cut action.
+pub fn paint_cut_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let c = rect.center();
+    let stroke = Stroke::new(1.3, color);
+    let r = 2.2;
+    // Two finger loops at bottom
+    let loop_left = pos2(c.x - 3.8, c.y + 4.0);
+    let loop_right = pos2(c.x + 3.8, c.y + 4.0);
+    painter.circle_stroke(loop_left, r, stroke);
+    painter.circle_stroke(loop_right, r, stroke);
+    // Crossing blades
+    let pivot = pos2(c.x, c.y - 0.5);
+    let tip_left = pos2(c.x - 4.5, c.y - 5.5);
+    let tip_right = pos2(c.x + 4.5, c.y - 5.5);
+    painter.line_segment([loop_left + vec2(1.5, -1.0), tip_right], stroke);
+    painter.line_segment([loop_right + vec2(-1.5, -1.0), tip_left], stroke);
+    painter.circle_filled(pivot, 1.2, color);
+}
+
+/// Paint clean vector overlapping sheets for Copy action.
+pub fn paint_copy_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let c = rect.center();
+    let stroke = Stroke::new(1.2, color);
+    // Back sheet (offset top-right)
+    let back_min = pos2(c.x - 1.5, c.y - 5.5);
+    let back_max = pos2(c.x + 5.5, c.y + 2.5);
+    let back_rect = Rect::from_min_max(back_min, back_max);
+    painter.rect_stroke(back_rect, CornerRadius::same(1), stroke, egui::StrokeKind::Inside);
+    // Front sheet (offset bottom-left)
+    let front_min = pos2(c.x - 5.5, c.y - 2.5);
+    let front_max = pos2(c.x + 1.5, c.y + 5.5);
+    let front_rect = Rect::from_min_max(front_min, front_max);
+    painter.rect_filled(front_rect, CornerRadius::same(1), Color32::from_black_alpha(200));
+    painter.rect_stroke(front_rect, CornerRadius::same(1), stroke, egui::StrokeKind::Inside);
+    // Document text lines inside front sheet
+    let line_y1 = front_min.y + 2.5;
+    let line_y2 = front_min.y + 5.0;
+    painter.line_segment([pos2(front_min.x + 1.8, line_y1), pos2(front_max.x - 1.8, line_y1)], Stroke::new(1.0, color));
+    painter.line_segment([pos2(front_min.x + 1.8, line_y2), pos2(front_max.x - 2.8, line_y2)], Stroke::new(1.0, color));
+}
+
+/// Paint clean vector clipboard for Paste action.
+pub fn paint_paste_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let c = rect.center();
+    let stroke = Stroke::new(1.2, color);
+    // Board
+    let board_min = pos2(c.x - 4.5, c.y - 4.0);
+    let board_max = pos2(c.x + 4.5, c.y + 5.8);
+    let board_rect = Rect::from_min_max(board_min, board_max);
+    painter.rect_stroke(board_rect, CornerRadius::same(2), stroke, egui::StrokeKind::Inside);
+    // Top Clip clamp
+    let clip_rect = Rect::from_center_size(pos2(c.x, c.y - 4.2), vec2(4.5, 2.4));
+    painter.rect_filled(clip_rect, CornerRadius::same(1), color);
+    // Paper inside board
+    let paper_min = pos2(c.x - 2.6, c.y - 1.8);
+    let paper_max = pos2(c.x + 2.6, c.y + 4.0);
+    let paper_rect = Rect::from_min_max(paper_min, paper_max);
+    painter.rect_stroke(paper_rect, CornerRadius::same(1), Stroke::new(1.0, color), egui::StrokeKind::Inside);
+    let line_y = paper_min.y + 2.4;
+    painter.line_segment([pos2(paper_min.x + 1.0, line_y), pos2(paper_max.x - 1.0, line_y)], Stroke::new(0.9, color));
+}
+
+/// Paint clean vector select-all icon.
+pub fn paint_select_all_icon(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let c = rect.center();
+    let stroke = Stroke::new(1.2, color);
+    let box_rect = Rect::from_center_size(c, vec2(11.0, 11.0));
+    painter.rect_stroke(box_rect, CornerRadius::same(2), stroke, egui::StrokeKind::Inside);
+    let inner = Rect::from_center_size(c, vec2(5.0, 5.0));
+    painter.rect_filled(inner, CornerRadius::same(1), color);
+}
+
+/// Context menu item with vector icon, label, and keyboard shortcut hint.
+pub fn context_menu_item<F>(
+    ui: &mut Ui,
+    t: &Tokens,
+    paint_icon: F,
+    label: &str,
+    shortcut: &str,
+    enabled: bool,
+) -> Response
+where
+    F: FnOnce(&egui::Painter, Rect, Color32),
+{
+    let desired_size = vec2(185.0, 26.0);
+    let (rect, resp) = ui.allocate_exact_size(desired_size, if enabled { Sense::click() } else { Sense::hover() });
+
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        if enabled && resp.hovered() {
+            painter.rect_filled(rect, CornerRadius::same(t.radius_sm as u8), t.hover);
+        }
+
+        let icon_color = if enabled {
+            if resp.hovered() { t.accent_text } else { t.icon }
+        } else {
+            t.text_faint
+        };
+
+        let text_color = if enabled {
+            t.text
+        } else {
+            t.text_faint
+        };
+
+        // Icon area (14x14)
+        let icon_rect = Rect::from_center_size(pos2(rect.left() + 14.0, rect.center().y), vec2(14.0, 14.0));
+        paint_icon(painter, icon_rect, icon_color);
+
+        // Label
+        let font_id = FontId::proportional(12.5);
+        painter.text(
+            pos2(rect.left() + 28.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            label,
+            font_id,
+            text_color,
+        );
+
+        // Shortcut
+        let sc_font_id = FontId::proportional(11.0);
+        painter.text(
+            pos2(rect.right() - 8.0, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            shortcut,
+            sc_font_id,
+            t.text_faint,
+        );
+    }
+
+    if enabled {
+        resp.on_hover_cursor(CursorIcon::PointingHand)
+    } else {
+        resp
+    }
+}
+
 /// Install font fallback stack to prevent missing glyph tofu.
 pub fn install_fonts(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();

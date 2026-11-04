@@ -157,7 +157,21 @@ fn parse_table_cells(trimmed: &str) -> Vec<&str> {
 
 fn parse_line(line: &str) -> Block<'_> {
     let trimmed = line.trim_start();
-    let indent = (line.len() - trimmed.len()) / 2;
+    let leading = &line[..line.len() - trimmed.len()];
+    let mut indent = 0;
+    let mut spaces = 0;
+    for c in leading.chars() {
+        if c == '\t' {
+            indent += 1;
+            spaces = 0;
+        } else if c == ' ' {
+            spaces += 1;
+            if spaces == 2 {
+                indent += 1;
+                spaces = 0;
+            }
+        }
+    }
 
     if trimmed.is_empty() {
         return Block::Blank;
@@ -171,20 +185,36 @@ fn parse_line(line: &str) -> Block<'_> {
     if let Some(rest) = trimmed.strip_prefix('>') {
         return Block::Quote(rest.trim_start().to_owned());
     }
-    if let Some(rest) = trimmed
-        .strip_prefix("- ")
-        .or_else(|| trimmed.strip_prefix("* "))
-        .or_else(|| trimmed.strip_prefix("+ "))
-    {
-        let (marker, text) = if let Some(t) = rest.strip_prefix("[ ] ") {
+
+    // Handle unordered lists with `-`, `*`, `+`
+    let is_bullet_prefix = trimmed.starts_with("- ")
+        || trimmed.starts_with("-\t")
+        || trimmed.starts_with("* ")
+        || trimmed.starts_with("*\t")
+        || trimmed.starts_with("+ ")
+        || trimmed.starts_with("+\t");
+
+    let is_empty_bullet = trimmed == "-" || trimmed == "*" || trimmed == "+";
+
+    if is_bullet_prefix || is_empty_bullet {
+        let rest = if is_empty_bullet {
+            ""
+        } else {
+            &trimmed[2..]
+        };
+
+        let (marker, text) = if rest == "[ ]" || rest.starts_with("[ ] ") {
+            let t = rest.strip_prefix("[ ] ").unwrap_or("");
             (ListMarker::Task { checked: false }, t)
-        } else if let Some(t) = rest.strip_prefix("[x] ").or_else(|| rest.strip_prefix("[X] ")) {
+        } else if rest == "[x]" || rest.starts_with("[x] ") || rest == "[X]" || rest.starts_with("[X] ") {
+            let t = rest.strip_prefix("[x] ").or_else(|| rest.strip_prefix("[X] ")).unwrap_or("");
             (ListMarker::Task { checked: true }, t)
         } else {
             (ListMarker::Bullet, rest)
         };
         return Block::ListItem { indent, marker, text };
     }
+
     if let Some((num, rest)) = trimmed.split_once(". ") {
         if !num.is_empty() && num.chars().all(|c| c.is_ascii_digit()) {
             return Block::ListItem {
@@ -214,10 +244,12 @@ fn parse_heading(line: &str) -> Option<Block<'_>> {
 
 fn is_rule(line: &str) -> bool {
     let line = line.trim();
-    line.len() >= 3
-        && ['-', '*', '_']
-            .iter()
-            .any(|&c| line.chars().all(|x| x == c || x == ' ') && line.contains(c))
+    ['-', '*', '_']
+        .iter()
+        .any(|&c| {
+            line.chars().filter(|&x| x == c).count() >= 3
+                && line.chars().all(|x| x == c || x == ' ' || x == '\t')
+        })
 }
 
 /// Splits a line of text into inline spans.
@@ -416,6 +448,26 @@ mod tests {
                 Block::Quote("quote".into()),
                 Block::Rule,
                 Block::Paragraph("#tag line"),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_list_variations_and_indentation() {
+        let src = "- item 1\n-\n* star item\n+\tplus tab\n\t- tab indent\n    - four spaces\n- [ ] empty task\n- [x] done task\n- - not rule\n---\n";
+        assert_eq!(
+            blocks(src),
+            vec![
+                Block::ListItem { indent: 0, marker: ListMarker::Bullet, text: "item 1" },
+                Block::ListItem { indent: 0, marker: ListMarker::Bullet, text: "" },
+                Block::ListItem { indent: 0, marker: ListMarker::Bullet, text: "star item" },
+                Block::ListItem { indent: 0, marker: ListMarker::Bullet, text: "plus tab" },
+                Block::ListItem { indent: 1, marker: ListMarker::Bullet, text: "tab indent" },
+                Block::ListItem { indent: 2, marker: ListMarker::Bullet, text: "four spaces" },
+                Block::ListItem { indent: 0, marker: ListMarker::Task { checked: false }, text: "empty task" },
+                Block::ListItem { indent: 0, marker: ListMarker::Task { checked: true }, text: "done task" },
+                Block::ListItem { indent: 0, marker: ListMarker::Bullet, text: "- not rule" },
+                Block::Rule,
             ]
         );
     }
